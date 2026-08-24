@@ -32,7 +32,7 @@ schema.unstable.json and v2 schemas are not merged into this package.
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc
+go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.1
 ~~~
 
 ## Agent side
@@ -69,7 +69,9 @@ advertising their dedicated optional interfaces.
 
 transport/stdio.StartClient launches an explicitly named executable with an
 argument slice. It never invokes a shell, drains child stderr, connects the
-typed client, and exposes idempotent close/wait lifecycle.
+typed client, and exposes idempotent close/wait lifecycle. On Windows, ACP
+children are started without creating or showing a console window. `Process`
+retains sole ownership of the underlying command's wait operation.
 
 ## Resource bounds and lifecycle
 

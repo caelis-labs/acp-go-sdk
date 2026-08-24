@@ -43,6 +43,16 @@ jobs:
       - run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
       - run: cd cmd/generate && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
 
+  windows-stdio:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.x
+          cache: false
+      - run: go test -race ./transport/stdio
+
   official-sdk-interop:
     runs-on: ubuntu-latest
     steps:

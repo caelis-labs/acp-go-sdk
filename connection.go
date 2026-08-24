@@ -309,7 +309,7 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 		pending:                make(map[string]*pendingResponse),
 		inflight:               make(map[string]context.CancelCauseFunc),
 		completedNotifications: make(map[uint64]struct{}),
-		notificationProgress:   make(chan struct{}, 1),
+		notificationProgress:   make(chan struct{}),
 		responseDeliverySlots:  make(chan struct{}, normalized.MaxPendingRequests),
 		requestQueue:           make(chan queuedRequest, normalized.MaxQueuedRequests),
 		notificationQueue:      make(chan queuedNotification, normalized.MaxQueuedNotifications),
@@ -527,11 +527,9 @@ func (c *Connection) markNotificationComplete(seq uint64) {
 		delete(c.completedNotifications, next)
 		c.completedNotificationSeq = next
 	}
+	close(c.notificationProgress)
+	c.notificationProgress = make(chan struct{})
 	c.notifyMu.Unlock()
-	select {
-	case c.notificationProgress <- struct{}{}:
-	default:
-	}
 }
 
 func (c *Connection) notificationAlreadyProcessed(seq uint64) bool {
@@ -925,6 +923,7 @@ func (c *Connection) waitNotificationsUpTo(ctx context.Context, target uint64) e
 	for {
 		c.notifyMu.Lock()
 		complete := c.completedNotificationSeq >= target
+		progress := c.notificationProgress
 		c.notifyMu.Unlock()
 		if complete {
 			return nil
@@ -934,7 +933,7 @@ func (c *Connection) waitNotificationsUpTo(ctx context.Context, target uint64) e
 			return toReqErr(context.Cause(ctx))
 		case <-c.Done():
 			return c.connectionCause()
-		case <-c.notificationProgress:
+		case <-progress:
 		}
 	}
 }
@@ -1084,10 +1083,6 @@ func (c *Connection) shutdown(cause error) {
 		}
 		if closer, ok := c.w.(io.Closer); ok {
 			_ = closer.Close()
-		}
-		select {
-		case c.notificationProgress <- struct{}{}:
-		default:
 		}
 	})
 }

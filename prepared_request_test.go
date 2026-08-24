@@ -541,6 +541,172 @@ func TestPreparedRequestObserverCausalOrdering(t *testing.T) {
 	}
 }
 
+func TestConcurrentPreparedResponsesBroadcastNotificationProgress(t *testing.T) {
+	connectionSide, peerSide := net.Pipe()
+	notificationStarted := make(chan struct{})
+	releaseNotification := make(chan struct{})
+	var notificationComplete atomic.Bool
+	connection, err := NewConnectionWithOptions(func(_ context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+		if method != "session/update" {
+			return nil, NewMethodNotFound(method)
+		}
+		close(notificationStarted)
+		<-releaseNotification
+		notificationComplete.Store(true)
+		return nil, nil
+	}, connectionSide, connectionSide, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	defer func() { _ = peerSide.Close() }()
+
+	prompt, err := PrepareRequest[string](connection, "session/prompt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steering, err := PrepareRequest[string](connection, "_session/steering", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := make(chan string, 2)
+	observe := func(name string) ResponseObserver {
+		return func(context.Context, RPCResponse) error {
+			if !notificationComplete.Load() {
+				t.Errorf("%s response observer ran before session/update completed", name)
+			}
+			observed <- name
+			return nil
+		}
+	}
+	if err := prompt.ObserveResponse(observe("prompt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := steering.ObserveResponse(observe("steering")); err != nil {
+		t.Fatal(err)
+	}
+
+	peerErr := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(peerSide)
+		ids := make(map[string]*json.RawMessage, 2)
+		for len(ids) < 2 {
+			line, readErr := reader.ReadBytes('\n')
+			if readErr != nil {
+				peerErr <- readErr
+				return
+			}
+			var request anyMessage
+			if err := json.Unmarshal(line, &request); err != nil {
+				peerErr <- err
+				return
+			}
+			ids[request.Method] = request.ID
+		}
+		messages := []anyMessage{
+			{Method: "session/update", Params: json.RawMessage(`{}`)},
+			{ID: ids["_session/steering"], Result: json.RawMessage(`"steered"`)},
+			{ID: ids["session/prompt"], Result: json.RawMessage(`"prompted"`)},
+		}
+		for _, message := range messages {
+			encoded, err := encodeMessage(message)
+			if err != nil {
+				peerErr <- err
+				return
+			}
+			if _, err := peerSide.Write(encoded); err != nil {
+				peerErr <- err
+				return
+			}
+		}
+		peerErr <- nil
+	}()
+
+	ctx, cancel := waitContext(t)
+	defer cancel()
+	if err := prompt.Dispatch(ctx, DispatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := steering.Dispatch(ctx, DispatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	type waitResult struct {
+		name   string
+		result string
+		err    error
+	}
+	waits := make(chan waitResult, 2)
+	go func() {
+		result, err := prompt.Wait(ctx)
+		waits <- waitResult{name: "prompt", result: result, err: err}
+	}()
+	go func() {
+		result, err := steering.Wait(ctx)
+		waits <- waitResult{name: "steering", result: result, err: err}
+	}()
+
+	select {
+	case <-notificationStarted:
+	case <-ctx.Done():
+		t.Fatal("session/update handler did not start")
+	}
+	if err := <-peerErr; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-prompt.pending.done:
+	case <-ctx.Done():
+		t.Fatal("prompt response did not arrive while notification was blocked")
+	}
+	select {
+	case <-steering.pending.done:
+	case <-ctx.Done():
+		t.Fatal("steering response did not arrive while notification was blocked")
+	}
+	promptResponse, _ := prompt.pending.result()
+	steeringResponse, _ := steering.pending.result()
+	if promptResponse.notificationWatermark == 0 ||
+		promptResponse.notificationWatermark != steeringResponse.notificationWatermark {
+		t.Fatalf("response watermarks = prompt:%d steering:%d, want same non-zero watermark",
+			promptResponse.notificationWatermark, steeringResponse.notificationWatermark)
+	}
+	select {
+	case result := <-waits:
+		t.Fatalf("%s Wait completed before session/update release: %q, %v", result.name, result.result, result.err)
+	default:
+	}
+	select {
+	case name := <-observed:
+		t.Fatalf("%s observer ran before session/update release", name)
+	default:
+	}
+
+	close(releaseNotification)
+	wantResults := map[string]string{"prompt": "prompted", "steering": "steered"}
+	for range 2 {
+		select {
+		case result := <-waits:
+			if result.err != nil || result.result != wantResults[result.name] {
+				t.Fatalf("%s Wait = %q, %v", result.name, result.result, result.err)
+			}
+		case <-ctx.Done():
+			t.Fatal("both response waiters were not broadcast awake")
+		}
+	}
+	seenObservers := map[string]bool{}
+	for range 2 {
+		select {
+		case name := <-observed:
+			seenObservers[name] = true
+		case <-ctx.Done():
+			t.Fatal("both response observers did not run")
+		}
+	}
+	if !seenObservers["prompt"] || !seenObservers["steering"] {
+		t.Fatalf("observers = %#v", seenObservers)
+	}
+}
+
 func TestPreparedRequestObserverSeesJSONRPCError(t *testing.T) {
 	connectionSide, peerSide := net.Pipe()
 	connection, err := NewConnectionWithOptions(nil, connectionSide, connectionSide, testOptions())

@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [v1.1.0-rc.1] - 2026-08-25
+
+### Ordering and stdio
+
+- Changed notification progress signaling from a single buffered token to a
+  broadcast generation channel. Concurrent prepared responses waiting for the
+  same earlier notification now all resume without serializing response waits.
+- ACP child processes started through `transport/stdio` now use
+  `HideWindow` and `CREATE_NO_WINDOW` on Windows. `Process` remains the sole
+  owner of the child command's `Wait` call.
+
 ## [v1.1.0-rc] - 2026-08-25
 
 ### Prepared request lifecycle

@@ -34,12 +34,14 @@ type Process struct {
 	closeOnce sync.Once
 }
 
-// Start launches an ACP subprocess and continuously drains its stderr.
+// Start launches an ACP subprocess and continuously drains its stderr. On
+// Windows it does not create or show a console window for the child.
 func Start(ctx context.Context, command Command) (*Process, error) {
 	if command.Executable == "" {
 		return nil, errors.New("stdio: executable is required")
 	}
 	cmd := exec.CommandContext(ctx, command.Executable, command.Args...)
+	configureProcessCommand(cmd)
 	cmd.Dir = command.Dir
 	cmd.WaitDelay = command.WaitDelay
 	if command.Env != nil {
