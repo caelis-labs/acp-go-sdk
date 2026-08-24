@@ -107,8 +107,8 @@ func (p *Process) Close() error {
 		if err := p.stdout.Close(); err != nil && !errors.Is(err, os.ErrClosed) && !p.waitComplete() && closeErr == nil {
 			closeErr = err
 		}
-		if p.cmd.Process != nil {
-			if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && closeErr == nil {
+		if p.cmd.Process != nil && !p.waitComplete() {
+			if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && !p.waitComplete() && closeErr == nil {
 				closeErr = err
 			}
 		}
