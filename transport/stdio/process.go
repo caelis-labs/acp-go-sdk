@@ -101,10 +101,10 @@ func (p *Process) Wait(ctx context.Context) error {
 func (p *Process) Close() error {
 	var closeErr error
 	p.closeOnce.Do(func() {
-		if err := p.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+		if err := p.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) && !p.waitComplete() {
 			closeErr = err
 		}
-		if err := p.stdout.Close(); err != nil && !errors.Is(err, os.ErrClosed) && closeErr == nil {
+		if err := p.stdout.Close(); err != nil && !errors.Is(err, os.ErrClosed) && !p.waitComplete() && closeErr == nil {
 			closeErr = err
 		}
 		if p.cmd.Process != nil {
@@ -114,6 +114,15 @@ func (p *Process) Close() error {
 		}
 	})
 	return closeErr
+}
+
+func (p *Process) waitComplete() bool {
+	select {
+	case <-p.waitDone:
+		return true
+	default:
+		return false
+	}
 }
 
 // ClientProcess couples a ClientSideConnection with the child it owns.

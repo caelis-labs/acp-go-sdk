@@ -12,8 +12,9 @@ All notable changes to this project are documented in this file.
   broadcast generation channel. Concurrent prepared responses waiting for the
   same earlier notification now all resume without serializing response waits.
 - ACP child processes started through `transport/stdio` now use
-  `HideWindow` and `CREATE_NO_WINDOW` on Windows. `Process` remains the sole
-  owner of the child command's `Wait` call.
+  `HideWindow` and `CREATE_NO_WINDOW` on Windows. Post-exit pipe cleanup is
+  idempotent across Windows and Unix, while `Process` remains the sole owner of
+  the child command's `Wait` call.
 
 ## [v1.1.0-rc] - 2026-08-25
 
