@@ -659,9 +659,13 @@ func TestResponseDeliveryBarrierIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	connection.mu.Lock()
+	first.responded = true
+	second.responded = true
 	delete(connection.pending, "1")
 	delete(connection.pending, "2")
 	connection.mu.Unlock()
+	first.complete(responseEnvelope{delivery: first.delivery}, nil)
+	second.complete(responseEnvelope{delivery: second.delivery}, nil)
 	connection.deliveryMu.Lock()
 	first.delivery.previous = connection.lastResponseDelivery
 	connection.lastResponseDelivery = first.delivery
@@ -678,7 +682,7 @@ func TestResponseDeliveryBarrierIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gated request after ordered release: %v", err)
 	}
-	if !connection.abandonPending("3", third) {
+	if !connection.abandonPending("3", third, ErrRequestAbandoned) {
 		t.Fatal("gated request was not released")
 	}
 }

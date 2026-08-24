@@ -32,7 +32,7 @@ schema.unstable.json and v2 schemas are not merged into this package.
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.0.1
+go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc
 ~~~
 
 ## Agent side
@@ -107,6 +107,65 @@ reverse requests; notifications sent before the reverse response are processed
 in that ordered call stack before the request returns. A notification handler's
 context is canceled when the handler returns and must not be retained for
 asynchronous work.
+
+## Prepared request lifecycle
+
+Advanced callers can reserve a bounded pending request without writing to the
+transport, dispatch it under one context, and transfer response ownership to a
+different context:
+
+~~~go
+request, err := acp.PrepareClientRequest[acp.PromptResponse](
+    connection,
+    acp.AgentMethodSessionPrompt,
+    params,
+)
+if err != nil {
+    return err
+}
+defer request.Abandon()
+
+if err := request.ObserveResponse(func(ctx context.Context, response acp.RPCResponse) error {
+    // response.Result is available before typed decoding. JSON-RPC failures
+    // are reported through response.Error as *acp.RequestError.
+    return updateLocalAdmission(ctx, response)
+}); err != nil {
+    return err
+}
+
+if err := request.Dispatch(dispatchCtx, acp.DispatchOptions{
+    Abort: func(error) error { return connection.Close() },
+}); err != nil {
+    if state, ok := acp.RequestSubmissionStateOf(err); ok &&
+        state == acp.RequestSubmissionNotStarted {
+        // The writer was never invoked and can no longer be invoked.
+    }
+    return err
+}
+
+response, err := request.Wait(producerCtx)
+~~~
+
+`Dispatch` returning nil proves only that the local writer accepted the full
+frame; it does not prove that the peer executed or committed the operation.
+Once the writer is invoked, errors remain `RequestSubmissionPossible` even for
+zero-byte or partial writes. A live or concurrently dispatching request reports
+`RequestSubmissionPending`, which is also not safe to retry. Only an SDK
+classification of `RequestSubmissionNotStarted` proves that future submission
+is impossible; `RequestMayHaveBeenSubmitted` treats unclassified errors
+conservatively.
+
+`CancelRequest` sends at most one best-effort ACP `$/cancel_request` after a
+successful dispatch and retains the original response waiter. `Abandon` only
+releases local pending ownership. `DispatchOptions.Abort` is the separate
+transport-revocation hook for a write that cannot be interrupted by context
+cancellation; closing a shared connection can terminate other pending requests.
+
+Response observers run after notifications received before the response have
+completed and before typed decoding or public `Wait` completion. Notifications
+received after the response remain gated until observation and response
+completion finish. Observers must not wait for work that depends on a later
+notification from the same connection.
 
 ## Generate and validate
 

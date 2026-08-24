@@ -128,8 +128,25 @@ type responseEnvelope struct {
 }
 
 type pendingResponse struct {
-	ch       chan responseEnvelope
-	delivery *responseDelivery
+	done      chan struct{}
+	once      sync.Once
+	response  responseEnvelope
+	err       error
+	delivery  *responseDelivery
+	admitted  bool // guarded by Connection.mu
+	responded bool // guarded by Connection.mu
+}
+
+func (p *pendingResponse) complete(response responseEnvelope, err error) {
+	p.once.Do(func() {
+		p.response = response
+		p.err = err
+		close(p.done)
+	})
+}
+
+func (p *pendingResponse) result() (responseEnvelope, error) {
+	return p.response, p.err
 }
 
 type responseDelivery struct {
@@ -194,9 +211,14 @@ type queuedRequest struct {
 }
 
 type queuedWrite struct {
-	ctx  context.Context
-	data []byte
-	done chan error
+	ctx        context.Context
+	data       []byte
+	done       chan writeResult
+	beginWrite func() error
+}
+
+type writeResult struct {
+	err error
 }
 
 // MethodHandler dispatches one inbound ACP request or notification.
@@ -478,6 +500,12 @@ func (c *Connection) processNotification(queued queuedNotification) {
 		c.markNotificationComplete(queued.seq)
 		return
 	}
+	select {
+	case <-c.Done():
+		c.markNotificationComplete(queued.seq)
+		return
+	default:
+	}
 	frame := &notificationFrame{seq: queued.seq, active: true}
 	handlerCtx, cancel := context.WithCancel(context.WithValue(c.ctx, notificationSequenceContextKey{}, frame))
 	c.handleInbound(handlerCtx, &queued.msg, nil)
@@ -520,6 +548,11 @@ func (c *Connection) waitResponseDelivery(ctx context.Context, delivery *respons
 	for delivery != nil {
 		select {
 		case <-delivery.done:
+			select {
+			case <-c.Done():
+				return c.connectionCause()
+			default:
+			}
 			delivery = delivery.previous
 		case <-ctx.Done():
 			return context.Cause(ctx)
@@ -582,14 +615,20 @@ func (c *Connection) processWrites() {
 			return
 		case write := <-c.writeQueue:
 			if err := write.ctx.Err(); err != nil {
-				write.done <- err
+				write.done <- writeResult{err: err}
 				continue
+			}
+			if write.beginWrite != nil {
+				if err := write.beginWrite(); err != nil {
+					write.done <- writeResult{err: err}
+					continue
+				}
 			}
 			n, err := c.w.Write(write.data)
 			if err == nil && n != len(write.data) {
 				err = io.ErrShortWrite
 			}
-			write.done <- err
+			write.done <- writeResult{err: err}
 			if err != nil {
 				c.shutdown(fmt.Errorf("acp: write failed: %w", err))
 				return
@@ -622,8 +661,10 @@ func (c *Connection) handleResponse(msg *anyMessage) {
 
 	c.mu.Lock()
 	pending := c.pending[idKey]
-	if pending != nil {
-		delete(c.pending, idKey)
+	if pending != nil && pending.admitted && !pending.responded {
+		pending.responded = true
+	} else {
+		pending = nil
 	}
 	c.mu.Unlock()
 	if pending == nil {
@@ -640,11 +681,11 @@ func (c *Connection) handleResponse(msg *anyMessage) {
 	c.notifyMu.Lock()
 	notificationWatermark := c.lastEnqueuedNotificationSeq
 	c.notifyMu.Unlock()
-	pending.ch <- responseEnvelope{
+	pending.complete(responseEnvelope{
 		msg:                   *msg,
 		notificationWatermark: notificationWatermark,
 		delivery:              pending.delivery,
-	}
+	}, nil)
 }
 
 func (c *Connection) handleCancelRequest(msg *anyMessage) {
@@ -723,14 +764,12 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 }
 
 func (c *Connection) sendMessage(ctx context.Context, msg anyMessage) error {
-	msg.JSONRPC = "2.0"
-	encoded, err := json.Marshal(msg)
+	encoded, err := encodeMessage(msg)
 	if err != nil {
 		return err
 	}
-	encoded = append(encoded, '\n')
 
-	write := queuedWrite{ctx: ctx, data: encoded, done: make(chan error, 1)}
+	write := queuedWrite{ctx: ctx, data: encoded, done: make(chan writeResult, 1)}
 	select {
 	case <-ctx.Done():
 		return context.Cause(ctx)
@@ -740,13 +779,22 @@ func (c *Connection) sendMessage(ctx context.Context, msg anyMessage) error {
 	}
 
 	select {
-	case err := <-write.done:
-		return err
+	case result := <-write.done:
+		return result.err
 	case <-ctx.Done():
 		return context.Cause(ctx)
 	case <-c.Done():
 		return c.connectionCause()
 	}
+}
+
+func encodeMessage(msg anyMessage) ([]byte, error) {
+	msg.JSONRPC = "2.0"
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, '\n'), nil
 }
 
 // SendRequest sends a JSON-RPC request and decodes its typed result.
@@ -766,49 +814,54 @@ func SendRequestWithResponseHook[T any](c *Connection, ctx context.Context, meth
 
 func sendRequest[T any](c *Connection, ctx context.Context, method string, params any, hook func(context.Context, T) error) (T, error) {
 	var result T
-	msg, idKey, err := c.prepareRequest(method, params)
+	prepared, err := prepareRequestLifecycle(c, method, params, hook != nil, hook)
 	if err != nil {
-		return result, err
+		return result, legacyRequestError(err)
 	}
-	pending, err := c.addPending(idKey, hook != nil)
-	if err != nil {
-		return result, err
-	}
-	if err := c.sendMessage(ctx, msg); err != nil {
-		if !c.abandonPending(idKey, pending) {
-			response := <-pending.ch
-			c.finishResponseDelivery(response.delivery)
-		}
-		if ctx.Err() != nil {
+	if err := prepared.Dispatch(ctx, DispatchOptions{}); err != nil {
+		prepared.Abandon()
+		if lifecycleContextFailure(err, ctx) {
 			return result, toReqErr(context.Cause(ctx))
 		}
-		return result, err
+		return result, legacyRequestError(err)
 	}
-
-	response, err := c.waitForResponse(ctx, pending, idKey)
+	result, err = prepared.Wait(ctx)
 	if err != nil {
-		return result, err
-	}
-	if response.delivery != nil {
-		defer c.finishResponseDelivery(response.delivery)
-	}
-	if err := c.waitNotificationsUpTo(ctx, response.notificationWatermark); err != nil {
-		return result, err
-	}
-	if response.msg.Error != nil {
-		return result, response.msg.Error
-	}
-	if len(response.msg.Result) != 0 {
-		if err := json.Unmarshal(response.msg.Result, &result); err != nil {
-			return result, NewInternalError(map[string]any{"error": err.Error()})
+		if lifecycleContextFailure(err, ctx) {
+			c.queueCancel(prepared.idKey)
+			prepared.Abandon()
+			return result, toReqErr(context.Cause(ctx))
 		}
-	}
-	if hook != nil {
-		if err := hook(ctx, result); err != nil {
-			return result, fmt.Errorf("acp: response hook: %w", err)
-		}
+		return result, legacyRequestError(err)
 	}
 	return result, nil
+}
+
+func legacyRequestError(err error) error {
+	var decodeErr *ResponseDecodeError
+	if errors.As(err, &decodeErr) {
+		if decodeErr.Err != nil {
+			return NewInternalError(map[string]any{"error": decodeErr.Err.Error()})
+		}
+		return NewInternalError(map[string]any{"error": decodeErr.Error()})
+	}
+	var lifecycleErr *RequestLifecycleError
+	if errors.As(err, &lifecycleErr) {
+		return lifecycleErr.Unwrap()
+	}
+	return err
+}
+
+func lifecycleContextFailure(err error, ctx context.Context) bool {
+	if ctx == nil || ctx.Err() == nil {
+		return false
+	}
+	var lifecycleErr *RequestLifecycleError
+	if !errors.As(err, &lifecycleErr) || !lifecycleErr.classified {
+		return false
+	}
+	operation := lifecycleErr.Operation()
+	return (operation == "dispatch" || operation == "wait") && errors.Is(lifecycleErr.Unwrap(), context.Cause(ctx))
 }
 
 func (c *Connection) prepareRequest(method string, params any) (anyMessage, string, error) {
@@ -839,10 +892,13 @@ func (c *Connection) addPending(idKey string, gated bool) (*pendingResponse, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.ctx != nil && c.ctx.Err() != nil {
+		return nil, c.connectionCause()
+	}
 	if len(c.pending) >= c.opts.MaxPendingRequests {
 		return nil, ErrPendingRequestsExceeded
 	}
-	pending := &pendingResponse{ch: make(chan responseEnvelope, 1)}
+	pending := &pendingResponse{done: make(chan struct{})}
 	if gated {
 		select {
 		case c.responseDeliverySlots <- struct{}{}:
@@ -853,24 +909,6 @@ func (c *Connection) addPending(idKey string, gated bool) (*pendingResponse, err
 	}
 	c.pending[idKey] = pending
 	return pending, nil
-}
-
-func (c *Connection) waitForResponse(ctx context.Context, pending *pendingResponse, idKey string) (responseEnvelope, error) {
-	select {
-	case response := <-pending.ch:
-		return response, nil
-	case <-ctx.Done():
-		if c.abandonPending(idKey, pending) {
-			c.queueCancel(idKey)
-			return responseEnvelope{}, toReqErr(context.Cause(ctx))
-		}
-		return <-pending.ch, nil
-	case <-c.Done():
-		if c.abandonPending(idKey, pending) {
-			return responseEnvelope{}, c.connectionCause()
-		}
-		return <-pending.ch, nil
-	}
 }
 
 func (c *Connection) waitNotificationsUpTo(ctx context.Context, target uint64) error {
@@ -936,15 +974,59 @@ func (c *Connection) queueCancel(idKey string) {
 	}
 }
 
-func (c *Connection) abandonPending(idKey string, pending *pendingResponse) bool {
+func (c *Connection) abandonPending(idKey string, pending *pendingResponse, cause error) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.pending[idKey] != pending {
+	if c.pending[idKey] != pending || pending.responded {
+		c.mu.Unlock()
 		return false
 	}
 	delete(c.pending, idKey)
+	c.mu.Unlock()
 	c.discardResponseDelivery(pending.delivery)
+	pending.complete(responseEnvelope{}, cause)
 	return true
+}
+
+func (c *Connection) detachPending(idKey string, pending *pendingResponse) {
+	c.mu.Lock()
+	if c.pending[idKey] == pending {
+		delete(c.pending, idKey)
+	}
+	c.mu.Unlock()
+}
+
+func (c *Connection) pendingResponded(idKey string, pending *pendingResponse) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pending[idKey] == pending && pending.responded
+}
+
+func (c *Connection) admitPending(idKey string, pending *pendingResponse) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ctx.Err() != nil {
+		return c.connectionCause()
+	}
+	if c.pending[idKey] != pending {
+		return ErrPreparedRequestUnavailable
+	}
+	pending.admitted = true
+	return nil
+}
+
+func (c *Connection) finishPending(idKey string, pending *pendingResponse) {
+	c.mu.Lock()
+	responded := pending.responded
+	if c.pending[idKey] == pending {
+		delete(c.pending, idKey)
+	}
+	c.mu.Unlock()
+	if responded {
+		<-pending.done
+		c.finishResponseDelivery(pending.delivery)
+		return
+	}
+	c.discardResponseDelivery(pending.delivery)
 }
 
 func (c *Connection) removeInflight(idKey string) {
@@ -980,7 +1062,23 @@ func (c *Connection) shutdown(cause error) {
 		cause = ErrConnectionClosed
 	}
 	c.shutdownOnce.Do(func() {
+		c.mu.Lock()
 		c.cancel(cause)
+		pending := make([]*pendingResponse, 0, len(c.pending))
+		for idKey, response := range c.pending {
+			delete(c.pending, idKey)
+			pending = append(pending, response)
+		}
+		c.mu.Unlock()
+		for _, response := range pending {
+			if response.responded {
+				<-response.done
+				c.finishResponseDelivery(response.delivery)
+				continue
+			}
+			response.complete(responseEnvelope{}, cause)
+			c.discardResponseDelivery(response.delivery)
+		}
 		if closer, ok := c.r.(io.Closer); ok {
 			_ = closer.Close()
 		}
