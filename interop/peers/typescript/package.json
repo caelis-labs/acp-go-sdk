@@ -1,0 +1,16 @@
+{
+  "name": "acp-go-sdk-typescript-interop-peer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "typescript": "6.0.2"
+  }
+}

@@ -1,0 +1,10 @@
+ACP Go SDK
+Copyright 2026 Caelis Labs
+
+This product includes software derived from coder/acp-go-sdk,
+Copyright Coder Technologies, Inc., licensed under the Apache License 2.0:
+https://github.com/coder/acp-go-sdk
+
+Generated protocol definitions are derived from the Agent Client Protocol
+JSON Schema, licensed under the Apache License 2.0:
+https://github.com/agentclientprotocol/agent-client-protocol

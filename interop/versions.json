@@ -1,0 +1,19 @@
+{
+  "typescript": {
+    "package": "@agentclientprotocol/sdk",
+    "repository": "https://github.com/agentclientprotocol/typescript-sdk",
+    "version": "1.4.0",
+    "tag": "v1.4.0",
+    "commit": "e6463f444093ed7c5f1cc937c3f32afb5853e906",
+    "integrity": "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg=="
+  },
+  "rust": {
+    "package": "agent-client-protocol",
+    "repository": "https://github.com/agentclientprotocol/rust-sdk",
+    "version": "2.0.0",
+    "tag": "v2.0.0",
+    "commit": "ce023279824149008659dd8f4b8b70266a7e8210",
+    "checksum": "6d87bc7769eba641753ba5dc52f73ec3765d51022c6753bf040967125ddc86a8",
+    "toolchain": "1.88.0"
+  }
+}

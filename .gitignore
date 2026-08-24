@@ -1,0 +1,8 @@
+/.gocache/
+/.gomodcache/
+/.artifacts/
+/coverage.out
+/version
+/interop/peers/typescript/dist/
+/interop/peers/typescript/node_modules/
+/interop/peers/rust/target/

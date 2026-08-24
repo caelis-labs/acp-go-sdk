@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - 1.23.x
+          - 1.25.x
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - run: make verify-schema
+      - run: make check-generated
+      - run: make test
+      - run: make vet
+      - run: go build ./example/...
+      - run: bash scripts/consumer-smoke.sh
+
+  race-and-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.x
+          cache: false
+      - run: make test-race
+      - run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
+      - run: cd cmd/generate && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
+
+  official-sdk-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.x
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: interop/peers/typescript/package-lock.json
+      - run: rustup toolchain install 1.88.0 --profile minimal --component clippy --component rustfmt
+      - run: make interop
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-sdk-interop-evidence
+          path: |
+            .artifacts/interop/
+            interop/versions.json
+            interop/peers/typescript/package-lock.json
+            interop/peers/rust/Cargo.lock
+          if-no-files-found: error
