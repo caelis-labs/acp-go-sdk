@@ -93,6 +93,15 @@ context cancellation is returned as JSON-RPC -32800.
 JSON-RPC errors are *acp.RequestError; callers can use errors.As to inspect
 Code, Message, and Data.
 
+Handlers that must send notifications only after a successful request response
+has reached the wire can register one callback with acp.AfterResponse. The
+callback receives a connection-lifetime context; use it instead of retaining
+the completed request context.
+For session creation, ClientSideConnection.NewSessionWithResponseHook lets the
+client install routing from the returned session ID before notifications that
+follow the response are dispatched. The hook must not wait for a later
+notification from the same connection.
+
 Notification handlers are invoked in wire order. They may synchronously issue
 reverse requests; notifications sent before the reverse response are processed
 in that ordered call stack before the request returns. A notification handler's

@@ -24,12 +24,14 @@ const (
 )
 
 var (
-	ErrConnectionClosed        = errors.New("acp: connection closed")
-	ErrPeerClosed              = errors.New("acp: peer closed connection")
-	ErrFrameTooLarge           = errors.New("acp: frame exceeds configured limit")
-	ErrPendingRequestsExceeded = errors.New("acp: pending request limit exceeded")
-	ErrRequestQueueFull        = errors.New("acp: inbound request queue full")
-	ErrNotificationQueueFull   = errors.New("acp: inbound notification queue full")
+	ErrConnectionClosed         = errors.New("acp: connection closed")
+	ErrPeerClosed               = errors.New("acp: peer closed connection")
+	ErrFrameTooLarge            = errors.New("acp: frame exceeds configured limit")
+	ErrPendingRequestsExceeded  = errors.New("acp: pending request limit exceeded")
+	ErrRequestQueueFull         = errors.New("acp: inbound request queue full")
+	ErrNotificationQueueFull    = errors.New("acp: inbound notification queue full")
+	ErrAfterResponseUnavailable = errors.New("acp: after-response callback requires an inbound request context")
+	ErrAfterResponseRegistered  = errors.New("acp: after-response callback already registered")
 )
 
 // ConnectionOptions bounds every connection-owned queue and source of
@@ -122,10 +124,18 @@ func (m *anyMessage) UnmarshalJSON(data []byte) error {
 type responseEnvelope struct {
 	msg                   anyMessage
 	notificationWatermark uint64
+	delivery              *responseDelivery
 }
 
 type pendingResponse struct {
-	ch chan responseEnvelope
+	ch       chan responseEnvelope
+	delivery *responseDelivery
+}
+
+type responseDelivery struct {
+	done     chan struct{}
+	once     sync.Once
+	previous *responseDelivery
 }
 
 type cancelRequestParams struct {
@@ -133,8 +143,39 @@ type cancelRequestParams struct {
 }
 
 type queuedNotification struct {
-	seq uint64
-	msg anyMessage
+	seq      uint64
+	delivery *responseDelivery
+	msg      anyMessage
+}
+
+type afterResponseContextKey struct{}
+
+type afterResponseState struct {
+	mu       sync.Mutex
+	sealed   bool
+	callback func(context.Context) error
+}
+
+func (s *afterResponseState) add(callback func(context.Context) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed {
+		return ErrAfterResponseUnavailable
+	}
+	if s.callback != nil {
+		return ErrAfterResponseRegistered
+	}
+	s.callback = callback
+	return nil
+}
+
+func (s *afterResponseState) seal() func(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sealed = true
+	callback := s.callback
+	s.callback = nil
+	return callback
 }
 
 type notificationSequenceContextKey struct{}
@@ -161,6 +202,21 @@ type queuedWrite struct {
 // MethodHandler dispatches one inbound ACP request or notification.
 type MethodHandler func(ctx context.Context, method string, params json.RawMessage) (any, *RequestError)
 
+// AfterResponse registers callback to run after the successful response for
+// the current inbound request has been written. At most one callback may be
+// registered per request. It runs synchronously with a connection-lifetime
+// context after the request context has been canceled.
+func AfterResponse(ctx context.Context, callback func(context.Context) error) error {
+	if callback == nil {
+		return errors.New("acp: after-response callback is required")
+	}
+	state, ok := ctx.Value(afterResponseContextKey{}).(*afterResponseState)
+	if !ok {
+		return ErrAfterResponseUnavailable
+	}
+	return state.add(callback)
+}
+
 // Connection is a bounded, bidirectional JSON-RPC 2.0 connection over
 // newline-delimited JSON.
 type Connection struct {
@@ -184,6 +240,10 @@ type Connection struct {
 	completedNotificationSeq    uint64
 	completedNotifications      map[uint64]struct{}
 	notificationProgress        chan struct{}
+
+	deliveryMu            sync.Mutex
+	lastResponseDelivery  *responseDelivery
+	responseDeliverySlots chan struct{}
 
 	requestQueue      chan queuedRequest
 	notificationQueue chan queuedNotification
@@ -228,6 +288,7 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 		inflight:               make(map[string]context.CancelCauseFunc),
 		completedNotifications: make(map[uint64]struct{}),
 		notificationProgress:   make(chan struct{}, 1),
+		responseDeliverySlots:  make(chan struct{}, normalized.MaxPendingRequests),
 		requestQueue:           make(chan queuedRequest, normalized.MaxQueuedRequests),
 		notificationQueue:      make(chan queuedNotification, normalized.MaxQueuedNotifications),
 		writeQueue:             make(chan queuedWrite, normalized.MaxQueuedWrites),
@@ -363,9 +424,10 @@ func (c *Connection) enqueueRequest(msg anyMessage) {
 }
 
 func (c *Connection) enqueueNotification(msg anyMessage) bool {
+	delivery := c.responseDeliveryBarrier()
 	c.notifyMu.Lock()
 	seq := c.lastEnqueuedNotificationSeq + 1
-	queued := queuedNotification{seq: seq, msg: msg}
+	queued := queuedNotification{seq: seq, delivery: delivery, msg: msg}
 	select {
 	case c.notificationQueue <- queued:
 		c.lastEnqueuedNotificationSeq = seq
@@ -384,9 +446,17 @@ func (c *Connection) processRequests() {
 		case <-c.Done():
 			return
 		case req := <-c.requestQueue:
-			c.handleInbound(req.ctx, &req.msg)
-			c.removeInflight(req.idKey)
-			req.cancel(nil)
+			finished := false
+			finish := func() {
+				if finished {
+					return
+				}
+				finished = true
+				c.removeInflight(req.idKey)
+				req.cancel(nil)
+			}
+			c.handleInbound(req.ctx, &req.msg, finish)
+			finish()
 		}
 	}
 }
@@ -404,9 +474,13 @@ func (c *Connection) processNotifications() {
 }
 
 func (c *Connection) processNotification(queued queuedNotification) {
+	if err := c.waitResponseDelivery(c.ctx, queued.delivery); err != nil {
+		c.markNotificationComplete(queued.seq)
+		return
+	}
 	frame := &notificationFrame{seq: queued.seq, active: true}
 	handlerCtx, cancel := context.WithCancel(context.WithValue(c.ctx, notificationSequenceContextKey{}, frame))
-	c.handleInbound(handlerCtx, &queued.msg)
+	c.handleInbound(handlerCtx, &queued.msg, nil)
 	frame.mu.Lock()
 	frame.active = false
 	frame.mu.Unlock()
@@ -440,6 +514,59 @@ func (c *Connection) notificationAlreadyProcessed(seq uint64) bool {
 	}
 	_, ok := c.completedNotifications[seq]
 	return ok
+}
+
+func (c *Connection) waitResponseDelivery(ctx context.Context, delivery *responseDelivery) error {
+	for delivery != nil {
+		select {
+		case <-delivery.done:
+			delivery = delivery.previous
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-c.Done():
+			return c.connectionCause()
+		}
+	}
+	return nil
+}
+
+func (c *Connection) responseDeliveryBarrier() *responseDelivery {
+	c.deliveryMu.Lock()
+	defer c.deliveryMu.Unlock()
+	c.pruneResponseDeliveriesLocked()
+	return c.lastResponseDelivery
+}
+
+func (c *Connection) pruneResponseDeliveriesLocked() {
+	for c.lastResponseDelivery != nil {
+		select {
+		case <-c.lastResponseDelivery.done:
+			c.lastResponseDelivery = c.lastResponseDelivery.previous
+			<-c.responseDeliverySlots
+		default:
+			return
+		}
+	}
+}
+
+func (c *Connection) finishResponseDelivery(delivery *responseDelivery) {
+	if delivery == nil {
+		return
+	}
+	delivery.once.Do(func() { close(delivery.done) })
+	c.deliveryMu.Lock()
+	c.pruneResponseDeliveriesLocked()
+	c.deliveryMu.Unlock()
+}
+
+func (c *Connection) discardResponseDelivery(delivery *responseDelivery) {
+	if delivery == nil {
+		return
+	}
+	delivery.once.Do(func() {
+		close(delivery.done)
+		<-c.responseDeliverySlots
+	})
 }
 
 func (c *Connection) processWrites() {
@@ -503,10 +630,21 @@ func (c *Connection) handleResponse(msg *anyMessage) {
 		return
 	}
 
+	if pending.delivery != nil {
+		c.deliveryMu.Lock()
+		c.pruneResponseDeliveriesLocked()
+		pending.delivery.previous = c.lastResponseDelivery
+		c.lastResponseDelivery = pending.delivery
+		c.deliveryMu.Unlock()
+	}
 	c.notifyMu.Lock()
-	watermark := c.lastEnqueuedNotificationSeq
+	notificationWatermark := c.lastEnqueuedNotificationSeq
 	c.notifyMu.Unlock()
-	pending.ch <- responseEnvelope{msg: *msg, notificationWatermark: watermark}
+	pending.ch <- responseEnvelope{
+		msg:                   *msg,
+		notificationWatermark: notificationWatermark,
+		delivery:              pending.delivery,
+	}
 }
 
 func (c *Connection) handleCancelRequest(msg *anyMessage) {
@@ -529,14 +667,22 @@ func (c *Connection) handleCancelRequest(msg *anyMessage) {
 	}
 }
 
-func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
+func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, responseCommitted func()) {
 	response := anyMessage{ID: req.ID}
 	if c.handler == nil {
 		if req.ID != nil {
 			response.Error = NewMethodNotFound(req.Method)
-			_ = c.sendMessage(c.ctx, response)
+			if err := c.sendMessage(c.ctx, response); err == nil && responseCommitted != nil {
+				responseCommitted()
+			}
 		}
 		return
+	}
+
+	var afterResponse *afterResponseState
+	if req.ID != nil {
+		afterResponse = &afterResponseState{}
+		ctx = context.WithValue(ctx, afterResponseContextKey{}, afterResponse)
 	}
 
 	result, reqErr := c.handler(ctx, req.Method, req.Params)
@@ -547,6 +693,8 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
 		return
 	}
 
+	callback := afterResponse.seal()
+	responseSucceeded := false
 	if reqErr != nil {
 		response.Error = reqErr
 	} else {
@@ -555,9 +703,23 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
 			response.Error = NewInternalError(map[string]any{"error": err.Error()})
 		} else {
 			response.Result = encoded
+			responseSucceeded = true
 		}
 	}
-	_ = c.sendMessage(c.ctx, response)
+	if err := c.sendMessage(c.ctx, response); err != nil {
+		return
+	}
+	if responseCommitted != nil {
+		responseCommitted()
+	}
+	if !responseSucceeded {
+		return
+	}
+	if callback != nil {
+		if err := callback(c.ctx); err != nil {
+			c.loggerOrDefault().Warn("after-response callback failed", "err", err)
+		}
+	}
 }
 
 func (c *Connection) sendMessage(ctx context.Context, msg anyMessage) error {
@@ -589,17 +751,34 @@ func (c *Connection) sendMessage(ctx context.Context, msg anyMessage) error {
 
 // SendRequest sends a JSON-RPC request and decodes its typed result.
 func SendRequest[T any](c *Connection, ctx context.Context, method string, params any) (T, error) {
+	return sendRequest[T](c, ctx, method, params, nil)
+}
+
+// SendRequestWithResponseHook sends a JSON-RPC request and invokes hook after
+// its successful response has been decoded and all earlier notifications have
+// completed. Notifications received after the response are not dispatched
+// until hook returns, and its error is returned to the caller. Ordered response
+// deliveries are bounded by MaxPendingRequests. The hook must not wait for work
+// that depends on a later notification from c.
+func SendRequestWithResponseHook[T any](c *Connection, ctx context.Context, method string, params any, hook func(context.Context, T) error) (T, error) {
+	return sendRequest(c, ctx, method, params, hook)
+}
+
+func sendRequest[T any](c *Connection, ctx context.Context, method string, params any, hook func(context.Context, T) error) (T, error) {
 	var result T
 	msg, idKey, err := c.prepareRequest(method, params)
 	if err != nil {
 		return result, err
 	}
-	pending, err := c.addPending(idKey)
+	pending, err := c.addPending(idKey, hook != nil)
 	if err != nil {
 		return result, err
 	}
 	if err := c.sendMessage(ctx, msg); err != nil {
-		c.cleanupPending(idKey)
+		if !c.abandonPending(idKey, pending) {
+			response := <-pending.ch
+			c.finishResponseDelivery(response.delivery)
+		}
 		if ctx.Err() != nil {
 			return result, toReqErr(context.Cause(ctx))
 		}
@@ -610,6 +789,9 @@ func SendRequest[T any](c *Connection, ctx context.Context, method string, param
 	if err != nil {
 		return result, err
 	}
+	if response.delivery != nil {
+		defer c.finishResponseDelivery(response.delivery)
+	}
 	if err := c.waitNotificationsUpTo(ctx, response.notificationWatermark); err != nil {
 		return result, err
 	}
@@ -619,6 +801,11 @@ func SendRequest[T any](c *Connection, ctx context.Context, method string, param
 	if len(response.msg.Result) != 0 {
 		if err := json.Unmarshal(response.msg.Result, &result); err != nil {
 			return result, NewInternalError(map[string]any{"error": err.Error()})
+		}
+	}
+	if hook != nil {
+		if err := hook(ctx, result); err != nil {
+			return result, fmt.Errorf("acp: response hook: %w", err)
 		}
 	}
 	return result, nil
@@ -644,13 +831,26 @@ func (c *Connection) prepareRequest(method string, params any) (anyMessage, stri
 	return msg, string(idRaw), nil
 }
 
-func (c *Connection) addPending(idKey string) (*pendingResponse, error) {
+func (c *Connection) addPending(idKey string, gated bool) (*pendingResponse, error) {
+	if gated {
+		c.deliveryMu.Lock()
+		c.pruneResponseDeliveriesLocked()
+		c.deliveryMu.Unlock()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.pending) >= c.opts.MaxPendingRequests {
 		return nil, ErrPendingRequestsExceeded
 	}
 	pending := &pendingResponse{ch: make(chan responseEnvelope, 1)}
+	if gated {
+		select {
+		case c.responseDeliverySlots <- struct{}{}:
+			pending.delivery = &responseDelivery{done: make(chan struct{})}
+		default:
+			return nil, ErrPendingRequestsExceeded
+		}
+	}
 	c.pending[idKey] = pending
 	return pending, nil
 }
@@ -660,12 +860,16 @@ func (c *Connection) waitForResponse(ctx context.Context, pending *pendingRespon
 	case response := <-pending.ch:
 		return response, nil
 	case <-ctx.Done():
-		c.cleanupPending(idKey)
-		c.queueCancel(idKey)
-		return responseEnvelope{}, toReqErr(context.Cause(ctx))
+		if c.abandonPending(idKey, pending) {
+			c.queueCancel(idKey)
+			return responseEnvelope{}, toReqErr(context.Cause(ctx))
+		}
+		return <-pending.ch, nil
 	case <-c.Done():
-		c.cleanupPending(idKey)
-		return responseEnvelope{}, c.connectionCause()
+		if c.abandonPending(idKey, pending) {
+			return responseEnvelope{}, c.connectionCause()
+		}
+		return <-pending.ch, nil
 	}
 }
 
@@ -732,10 +936,15 @@ func (c *Connection) queueCancel(idKey string) {
 	}
 }
 
-func (c *Connection) cleanupPending(idKey string) {
+func (c *Connection) abandonPending(idKey string, pending *pendingResponse) bool {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pending[idKey] != pending {
+		return false
+	}
 	delete(c.pending, idKey)
-	c.mu.Unlock()
+	c.discardResponseDelivery(pending.delivery)
+	return true
 }
 
 func (c *Connection) removeInflight(idKey string) {

@@ -484,6 +484,205 @@ func TestResponseWaitsForEarlierNotifications(t *testing.T) {
 	}
 }
 
+func TestAfterResponseWritesResponseBeforeNotification(t *testing.T) {
+	t.Parallel()
+	connectionSide, peerSide := net.Pipe()
+	var connection *Connection
+	var err error
+	connection, err = NewConnectionWithOptions(
+		func(ctx context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+			if method != "session/new" {
+				return nil, NewMethodNotFound(method)
+			}
+			requestCtx := ctx
+			if err := AfterResponse(ctx, func(callbackCtx context.Context) error {
+				select {
+				case <-requestCtx.Done():
+				default:
+					return errors.New("request context remained active after response")
+				}
+				if err := callbackCtx.Err(); err != nil {
+					return fmt.Errorf("callback context: %w", err)
+				}
+				return connection.SendNotification(callbackCtx, "session/update", map[string]any{"initial": true})
+			}); err != nil {
+				return nil, toReqErr(err)
+			}
+			return map[string]any{"sessionId": "session-1"}, nil
+		},
+		connectionSide,
+		connectionSide,
+		testOptions(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	defer func() { _ = peerSide.Close() }()
+	if err := peerSide.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := io.WriteString(peerSide, `{"jsonrpc":"2.0","id":1,"method":"session/new","params":{}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(peerSide)
+	responseLine, err := reader.ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateLine, err := reader.ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var response anyMessage
+	if err := json.Unmarshal(responseLine, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.ID == nil || response.Method != "" || response.Error != nil {
+		t.Fatalf("first frame = %#v, want successful response", response)
+	}
+	var update anyMessage
+	if err := json.Unmarshal(updateLine, &update); err != nil {
+		t.Fatal(err)
+	}
+	if update.ID != nil || update.Method != "session/update" {
+		t.Fatalf("second frame = %#v, want session/update notification", update)
+	}
+}
+
+func TestResponseHookGatesLaterNotificationAndReleasesOnError(t *testing.T) {
+	t.Parallel()
+	leftTransport, rightTransport := net.Pipe()
+	hookStarted := make(chan struct{})
+	releaseHook := make(chan struct{})
+	notificationHandled := make(chan bool, 1)
+	var hookComplete atomic.Bool
+
+	left, err := NewConnectionWithOptions(
+		func(_ context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+			if method != "session/update" {
+				return nil, NewMethodNotFound(method)
+			}
+			notificationHandled <- hookComplete.Load()
+			return nil, nil
+		},
+		leftTransport,
+		leftTransport,
+		testOptions(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var right *Connection
+	right, err = NewConnectionWithOptions(
+		func(ctx context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+			if method != "session/new" {
+				return nil, NewMethodNotFound(method)
+			}
+			if err := AfterResponse(ctx, func(callbackCtx context.Context) error {
+				return right.SendNotification(callbackCtx, "session/update", nil)
+			}); err != nil {
+				return nil, toReqErr(err)
+			}
+			return "session-1", nil
+		},
+		rightTransport,
+		rightTransport,
+		testOptions(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = left.Close() }()
+	defer func() { _ = right.Close() }()
+
+	ctx, cancel := waitContext(t)
+	defer cancel()
+	hookErr := errors.New("session routing failed")
+	requestDone := make(chan error, 1)
+	go func() {
+		_, err := SendRequestWithResponseHook[string](left, ctx, "session/new", nil, func(_ context.Context, result string) error {
+			if result != "session-1" {
+				return fmt.Errorf("response = %q", result)
+			}
+			close(hookStarted)
+			<-releaseHook
+			hookComplete.Store(true)
+			return hookErr
+		})
+		requestDone <- err
+	}()
+
+	select {
+	case <-hookStarted:
+	case <-ctx.Done():
+		t.Fatal("response hook did not start")
+	}
+	select {
+	case <-notificationHandled:
+		t.Fatal("notification was dispatched before the response hook completed")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseHook)
+	select {
+	case err := <-requestDone:
+		if !errors.Is(err, hookErr) {
+			t.Fatalf("request error = %v, want response hook error", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("request did not return after the response hook completed")
+	}
+	select {
+	case completed := <-notificationHandled:
+		if !completed {
+			t.Fatal("notification handler observed incomplete response hook")
+		}
+	case <-ctx.Done():
+		t.Fatal("notification was not released after the response hook error")
+	}
+}
+
+func TestResponseDeliveryBarrierIsBounded(t *testing.T) {
+	connection := &Connection{
+		opts:                  ConnectionOptions{MaxPendingRequests: 2},
+		pending:               make(map[string]*pendingResponse),
+		responseDeliverySlots: make(chan struct{}, 2),
+	}
+	first, err := connection.addPending("1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := connection.addPending("2", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.mu.Lock()
+	delete(connection.pending, "1")
+	delete(connection.pending, "2")
+	connection.mu.Unlock()
+	connection.deliveryMu.Lock()
+	first.delivery.previous = connection.lastResponseDelivery
+	connection.lastResponseDelivery = first.delivery
+	second.delivery.previous = connection.lastResponseDelivery
+	connection.lastResponseDelivery = second.delivery
+	connection.deliveryMu.Unlock()
+
+	connection.finishResponseDelivery(first.delivery)
+	if _, err := connection.addPending("3", true); !errors.Is(err, ErrPendingRequestsExceeded) {
+		t.Fatalf("third gated request error = %v, want pending request limit", err)
+	}
+	connection.finishResponseDelivery(second.delivery)
+	third, err := connection.addPending("3", true)
+	if err != nil {
+		t.Fatalf("gated request after ordered release: %v", err)
+	}
+	if !connection.abandonPending("3", third) {
+		t.Fatal("gated request was not released")
+	}
+}
+
 type blockingWriter struct {
 	release <-chan struct{}
 	started chan<- struct{}

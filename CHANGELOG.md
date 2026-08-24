@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Added bounded after-response callbacks and response hooks that preserve
+  causal delivery between a request response and immediately following
+  notifications, including session-scoped routing after `session/new`.
+
 ## [v1.0.1] - 2026-08-24
 
 First stable release from the rebuilt public repository history. It supersedes

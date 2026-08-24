@@ -47,3 +47,15 @@ func (c *ClientSideConnection) Err() error { return c.conn.Err() }
 
 // SetLogger directs connection diagnostics to the provided logger.
 func (c *ClientSideConnection) SetLogger(l *slog.Logger) { c.conn.SetLogger(l) }
+
+// NewSessionWithResponseHook creates a session and invokes hook after the
+// response is decoded but before any later session/update notification is
+// dispatched. Use the hook to install session-scoped routing derived from the
+// returned session ID.
+func (c *ClientSideConnection) NewSessionWithResponseHook(
+	ctx context.Context,
+	params NewSessionRequest,
+	hook func(context.Context, NewSessionResponse) error,
+) (NewSessionResponse, error) {
+	return SendRequestWithResponseHook(c.conn, ctx, AgentMethodSessionNew, params, hook)
+}
