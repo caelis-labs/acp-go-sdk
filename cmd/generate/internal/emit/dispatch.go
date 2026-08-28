@@ -33,6 +33,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 		}
 		caseBody := []Code{}
 		if mi.Notif != "" {
+			caseBody = append(caseBody, jRequireInboundKind("InboundNotification"))
 			caseBody = append(caseBody, jUnmarshalValidate(mi.Notif)...)
 			// Special-case: session/cancel should also cancel any in-flight prompt ctx for the session.
 			if mi.Method == "session/cancel" {
@@ -54,6 +55,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 			}
 			caseBody = append(caseBody, jCallNotification(recv, callName)...)
 		} else if mi.Req != "" {
+			caseBody = append(caseBody, jRequireInboundKind("InboundRequest"))
 			respName := strings.TrimSuffix(mi.Req, "Request") + "Response"
 			nullResp := ir.IsNullResponse(schema.Defs[respName])
 			caseBody = append(caseBody, jUnmarshalValidate(mi.Req)...)
@@ -181,6 +183,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 		}
 		body := []Code{}
 		if mi.Notif != "" {
+			body = append(body, jRequireInboundKind("InboundNotification"))
 			body = append(body, jUnmarshalValidate(mi.Notif)...)
 			callName := ir.DispatchMethodNameForNotification(k, mi.Notif)
 			pre, recv := jClientAssert(mi.Binding, callName, mi.Notif, "", false)
@@ -189,6 +192,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 			}
 			body = append(body, jCallNotification(recv, callName)...)
 		} else if mi.Req != "" {
+			body = append(body, jRequireInboundKind("InboundRequest"))
 			respName := strings.TrimSuffix(mi.Req, "Request") + "Response"
 			nullResp := ir.IsNullResponse(schema.Defs[respName])
 			body = append(body, jUnmarshalValidate(mi.Req)...)

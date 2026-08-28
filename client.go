@@ -23,13 +23,17 @@ func NewClientSideConnection(client Client, peerInput io.Writer, peerOutput io.R
 }
 
 // NewClientSideConnectionWithOptions creates a bounded client-side connection.
+// Client callbacks cannot begin until the returned peer object is fully
+// initialized and safe for reverse calls. Stream ownership transfers only on
+// successful construction.
 func NewClientSideConnectionWithOptions(client Client, peerInput io.Writer, peerOutput io.Reader, opts ConnectionOptions) (*ClientSideConnection, error) {
 	csc := &ClientSideConnection{client: client}
-	conn, err := NewConnectionWithOptions(csc.handleWithExtensions, peerInput, peerOutput, opts)
+	conn, err := constructConnection(csc.handleWithExtensions, peerInput, peerOutput, opts)
 	if err != nil {
 		return nil, err
 	}
 	csc.conn = conn
+	conn.start()
 	return csc, nil
 }
 

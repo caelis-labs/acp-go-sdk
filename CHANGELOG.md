@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [v1.1.0-rc.4] - 2026-08-28
+
+### Typed dispatch and lossless compatibility
+
+- Generated standard-method dispatchers now reject request/notification
+  direction mismatches before parameter decoding, cancellation-state changes,
+  or user callbacks. Extension handlers retain their explicit raw-direction
+  policy.
+- Added `InboundParamsFromContext`, which gives typed and extension handlers a
+  defensive copy of the lossless inbound JSON-RPC params without introducing a
+  second ingress path.
+- Added `AgentSideConnection.SessionUpdateRaw`, a fixed-method escape hatch for
+  forwarding future `session/update` variants and content blocks. It validates
+  the outer session notification envelope while leaving the update union
+  opaque.
+- Typed Agent and Client peers are now completely initialized before receive
+  workers start, so a callback handling an immediately available first frame
+  can safely issue a reverse call through its current-connection context.
+
+### Stdio process lifecycle
+
+- Added `Process.Shutdown(ctx)` and `ClientProcess.Shutdown(ctx)` for graceful
+  stdin/connection closure followed by deadline-bounded escalation and waiter
+  joining.
+- ACP subprocesses now start in an SDK-owned Unix process group or a Windows
+  Job Object. Immediate close, shutdown escalation, start-context cancellation,
+  and post-exit cleanup terminate inherited descendants without transferring
+  ownership of the command's single `Wait` call.
+- Windows children are created suspended, assigned to a kill-on-close Job
+  Object, and only then resumed, eliminating the post-start containment race.
+- Added graceful EOF, forced process-tree, repeated lifecycle, and concurrent
+  `Close`/`Shutdown`/`Wait` coverage, including native platform assertions.
+
 ### Release engineering and documentation
 
 - Added an exact-commit manual release workflow that creates an annotated tag

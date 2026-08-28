@@ -25,6 +25,7 @@ type InboundInfo struct {
 }
 
 type inboundInfoContextKey struct{}
+type inboundParamsContextKey struct{}
 type agentSideConnectionContextKey struct{}
 type clientSideConnectionContextKey struct{}
 
@@ -38,6 +39,18 @@ func InboundInfoFromContext(ctx context.Context) (InboundInfo, bool) {
 	}
 	info.RequestID = append(json.RawMessage(nil), info.RequestID...)
 	return info, true
+}
+
+// InboundParamsFromContext returns the lossless JSON-RPC params for the
+// current inbound handler invocation. The returned bytes are a defensive copy
+// and may be retained or modified by the caller. A nil RawMessage with a true
+// boolean means the inbound message omitted params.
+func InboundParamsFromContext(ctx context.Context) (json.RawMessage, bool) {
+	params, ok := ctx.Value(inboundParamsContextKey{}).(json.RawMessage)
+	if !ok {
+		return nil, false
+	}
+	return append(json.RawMessage(nil), params...), true
 }
 
 // AgentSideConnectionFromContext returns the current agent-side connection
@@ -60,5 +73,17 @@ func withInboundInfo(ctx context.Context, req *anyMessage) context.Context {
 		info.Kind = InboundRequest
 		info.RequestID = append(json.RawMessage(nil), (*req.ID)...)
 	}
-	return context.WithValue(ctx, inboundInfoContextKey{}, info)
+	ctx = context.WithValue(ctx, inboundInfoContextKey{}, info)
+	return context.WithValue(ctx, inboundParamsContextKey{}, append(json.RawMessage(nil), req.Params...))
+}
+
+func requireInboundKind(ctx context.Context, want InboundKind, method string) *RequestError {
+	info, ok := InboundInfoFromContext(ctx)
+	if !ok {
+		return NewInternalError(map[string]any{"error": "ACP inbound message metadata is unavailable"})
+	}
+	if info.Kind != want {
+		return NewMethodNotFound(method)
+	}
+	return nil
 }

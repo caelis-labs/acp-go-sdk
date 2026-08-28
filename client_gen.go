@@ -10,6 +10,9 @@ import (
 func (c *ClientSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
 	switch method {
 	case ClientMethodElicitationComplete:
+		if requestErr := requireInboundKind(ctx, InboundNotification, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p CompleteElicitationNotification
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -26,6 +29,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return nil, nil
 	case ClientMethodElicitationCreate:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p CreateElicitationRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -43,6 +49,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodFsReadTextFile:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p ReadTextFileRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -60,6 +69,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodFsWriteTextFile:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p WriteTextFileRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -77,6 +89,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodSessionRequestPermission:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p RequestPermissionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -90,6 +105,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodSessionUpdate:
+		if requestErr := requireInboundKind(ctx, InboundNotification, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p SessionNotification
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -102,6 +120,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return nil, nil
 	case ClientMethodTerminalCreate:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p CreateTerminalRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -119,6 +140,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodTerminalKill:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p KillTerminalRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -136,6 +160,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodTerminalOutput:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p TerminalOutputRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -153,6 +180,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodTerminalRelease:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p ReleaseTerminalRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -170,6 +200,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		}
 		return resp, nil
 	case ClientMethodTerminalWaitForExit:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p WaitForTerminalExitRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})

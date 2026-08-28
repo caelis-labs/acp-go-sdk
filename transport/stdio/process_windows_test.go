@@ -5,6 +5,7 @@ package stdio
 import (
 	"os/exec"
 	"testing"
+	"unsafe"
 )
 
 func TestConfigureProcessCommandHidesWindowsConsole(t *testing.T) {
@@ -18,5 +19,14 @@ func TestConfigureProcessCommandHidesWindowsConsole(t *testing.T) {
 	}
 	if cmd.SysProcAttr.CreationFlags&createNoWindow == 0 {
 		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
+	}
+	if cmd.SysProcAttr.CreationFlags&createSuspended == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_SUSPENDED", cmd.SysProcAttr.CreationFlags)
+	}
+}
+
+func TestJobBasicAccountingInformationLayout(t *testing.T) {
+	if got, want := unsafe.Sizeof(jobBasicAccountingInformation{}), uintptr(48); got != want {
+		t.Fatalf("job accounting information size = %d, want %d", got, want)
 	}
 }

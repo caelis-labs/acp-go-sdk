@@ -31,16 +31,20 @@ func NewAgentSideConnection(agent Agent, peerInput io.Writer, peerOutput io.Read
 }
 
 // NewAgentSideConnectionWithOptions creates a bounded agent-side connection.
+// Agent callbacks cannot begin until the returned peer object is fully
+// initialized and safe for reverse calls. Stream ownership transfers only on
+// successful construction.
 func NewAgentSideConnectionWithOptions(agent Agent, peerInput io.Writer, peerOutput io.Reader, opts ConnectionOptions) (*AgentSideConnection, error) {
 	asc := &AgentSideConnection{
 		agent:          agent,
 		sessionCancels: make(map[string]*sessionPromptCancel),
 	}
-	conn, err := NewConnectionWithOptions(asc.handleWithExtensions, peerInput, peerOutput, opts)
+	conn, err := constructConnection(asc.handleWithExtensions, peerInput, peerOutput, opts)
 	if err != nil {
 		return nil, err
 	}
 	asc.conn = conn
+	conn.start()
 	return asc, nil
 }
 

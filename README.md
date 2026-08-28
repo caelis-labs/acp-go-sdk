@@ -36,7 +36,7 @@ schema.unstable.json and v2 schemas are not merged into this package.
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.3
+go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.4
 ~~~
 
 ## Releases
@@ -90,6 +90,16 @@ typed client, and exposes idempotent close/wait lifecycle. On Windows, ACP
 children are started without creating or showing a console window. `Process`
 retains sole ownership of the underlying command's wait operation.
 
+Use `Process.Shutdown(ctx)` or `ClientProcess.Shutdown(ctx)` to close protocol
+input first, wait for a graceful exit within the caller's deadline, and then
+forcefully terminate and join the owned process tree. `Close` remains the
+immediate-stop operation. The first `Shutdown` call owns the graceful deadline,
+and later calls receive its cached terminal result. Unix containment covers
+descendants that remain in the inherited process group; Windows children are
+assigned to a kill-on-close Job Object before their initial thread is resumed.
+Grace duration, stderr
+retention, endpoint policy, and retry decisions remain application concerns.
+
 ## Resource bounds and lifecycle
 
 Every connection has finite limits for:
@@ -124,6 +134,12 @@ extension handlers can also retrieve the exact current peer with
 acp.AgentSideConnectionFromContext or acp.ClientSideConnectionFromContext;
 this is safe when one implementation serves multiple connections.
 
+Typed handlers that need compatibility evidence from a newer peer can use
+acp.InboundParamsFromContext. It returns a defensive copy of the original
+params, including unknown nested fields, while the generated dispatcher still
+validates the standard typed request. Standard methods are direction-checked
+before decoding or callback side effects.
+
 Handlers that must send notifications only after a successful request response
 has reached the wire can register one callback with acp.AfterResponse. The
 callback receives a connection-lifetime context; use it instead of retaining
@@ -144,6 +160,13 @@ explicit null, and value states for title and updatedAt. Use TitleState or
 UpdatedAtState to inspect decoded state, and the generated Set, Clear, and
 Unset methods to construct an update. The existing pointer fields remain
 available for value access and direct non-nil assignment.
+
+For transparent forwarding across schema revisions,
+AgentSideConnection.SessionUpdateRaw accepts lossless JSON params while fixing
+the wire method to `session/update`. It validates only the outer `sessionId`
+and `update` object; the caller owns the semantics of the opaque update. It
+does not expose arbitrary standard-method sending or bypass connection
+ordering and structured transport errors.
 
 ## Prepared request lifecycle
 

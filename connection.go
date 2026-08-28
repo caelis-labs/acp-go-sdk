@@ -287,9 +287,19 @@ func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Rea
 }
 
 // NewConnectionWithOptions creates a connection with explicit resource
-// limits. The connection owns peerInput and peerOutput and closes them when
-// the connection shuts down if they implement io.Closer.
+// limits. After successful construction, the connection owns peerInput and
+// peerOutput and closes them when the connection shuts down if they implement
+// io.Closer. A failed construction does not take ownership of either stream.
 func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ConnectionOptions) (*Connection, error) {
+	c, err := constructConnection(handler, peerInput, peerOutput, opts)
+	if err != nil {
+		return nil, err
+	}
+	c.start()
+	return c, nil
+}
+
+func constructConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ConnectionOptions) (*Connection, error) {
 	if peerInput == nil || peerOutput == nil {
 		return nil, errors.New("acp: peer input and output are required")
 	}
@@ -320,8 +330,11 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 	if normalized.Logger != nil {
 		c.logger.Store(normalized.Logger)
 	}
+	return c, nil
+}
 
-	workerCount := normalized.MaxHandlerConcurrency
+func (c *Connection) start() {
+	workerCount := c.opts.MaxHandlerConcurrency
 	c.wg.Add(4 + workerCount)
 	go c.receive()
 	go c.processNotifications()
@@ -334,7 +347,6 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 		c.wg.Wait()
 		close(c.waitDone)
 	}()
-	return c, nil
 }
 
 // SetLogger installs a logger used for non-payload diagnostics.

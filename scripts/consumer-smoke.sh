@@ -9,6 +9,7 @@ cd "$smoke_dir"
 go mod init example.com/acp-consumer
 go mod edit -replace github.com/caelis-labs/acp-go-sdk="$repo_root"
 go get github.com/caelis-labs/acp-go-sdk
+go get github.com/caelis-labs/acp-go-sdk/transport/stdio
 
 cat > main.go <<'EOF'
 package main
@@ -19,6 +20,7 @@ import (
 	"io"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/acp-go-sdk/transport/stdio"
 )
 
 func main() {
@@ -35,6 +37,10 @@ func main() {
 		panic(state)
 	}
 	_, _ = request.Wait(context.Background())
+	_, _ = acp.InboundParamsFromContext(context.Background())
+	_ = (*acp.AgentSideConnection).SessionUpdateRaw
+	_ = (*stdio.Process).Shutdown
+	_ = (*stdio.ClientProcess).Shutdown
 	fmt.Println(acp.WireProtocolVersion, block.Text.Text)
 }
 EOF

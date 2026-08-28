@@ -10,6 +10,9 @@ import (
 func (a *AgentSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
 	switch method {
 	case AgentMethodAuthenticate:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p AuthenticateRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -27,6 +30,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodInitialize:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p InitializeRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -40,6 +46,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodLogout:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p LogoutRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -57,6 +66,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionCancel:
+		if requestErr := requireInboundKind(ctx, InboundNotification, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p CancelNotification
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -75,6 +87,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return nil, nil
 	case AgentMethodSessionClose:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p CloseSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -92,6 +107,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionDelete:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p DeleteSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -109,6 +127,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionList:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p ListSessionsRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -126,6 +147,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionLoad:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p LoadSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -143,6 +167,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionNew:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p NewSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -156,6 +183,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionPrompt:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p PromptRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -185,6 +215,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionResume:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p ResumeSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -202,6 +235,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionSetConfigOption:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p SetSessionConfigOptionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -219,6 +255,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		return resp, nil
 	case AgentMethodSessionSetMode:
+		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
+			return nil, requestErr
+		}
 		var p SetSessionModeRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})

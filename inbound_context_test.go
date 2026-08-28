@@ -77,6 +77,100 @@ func TestInboundInfoDistinguishesRequestsAndNotifications(t *testing.T) {
 	}
 }
 
+func TestInboundParamsReportsOmittedParams(t *testing.T) {
+	ctx := withInboundInfo(context.Background(), &anyMessage{Method: "inspect"})
+	params, ok := InboundParamsFromContext(ctx)
+	if !ok || params != nil {
+		t.Fatalf("params, ok = %q, %v; want nil, true", params, ok)
+	}
+	if _, ok := InboundParamsFromContext(context.Background()); ok {
+		t.Fatal("context without an inbound invocation reported params")
+	}
+}
+
+type rawParamsAgent struct {
+	minimalAgent
+	seen chan rawParamsObservation
+}
+
+type rawParamsObservation struct {
+	prompt PromptRequest
+	raw    json.RawMessage
+	err    error
+}
+
+func (a *rawParamsAgent) Prompt(ctx context.Context, prompt PromptRequest) (PromptResponse, error) {
+	raw, ok := InboundParamsFromContext(ctx)
+	if !ok {
+		a.seen <- rawParamsObservation{err: fmt.Errorf("missing inbound params")}
+		return PromptResponse{StopReason: StopReasonEndTurn}, nil
+	}
+	original := append(json.RawMessage(nil), raw...)
+	if len(raw) > 0 {
+		raw[0] ^= 0xff
+	}
+	again, ok := InboundParamsFromContext(ctx)
+	if !ok {
+		a.seen <- rawParamsObservation{err: fmt.Errorf("missing inbound params on second read")}
+		return PromptResponse{StopReason: StopReasonEndTurn}, nil
+	}
+	if string(again) != string(original) {
+		a.seen <- rawParamsObservation{err: fmt.Errorf("inbound params were not defensively copied")}
+		return PromptResponse{StopReason: StopReasonEndTurn}, nil
+	}
+	a.seen <- rawParamsObservation{prompt: prompt, raw: again}
+	return PromptResponse{StopReason: StopReasonEndTurn}, nil
+}
+
+func TestTypedPromptContextPreservesLosslessRawParams(t *testing.T) {
+	t.Parallel()
+	implementation := &rawParamsAgent{seen: make(chan rawParamsObservation, 1)}
+	connectionSide, peerSide := net.Pipe()
+	connection, err := NewAgentSideConnectionWithOptions(implementation, connectionSide, connectionSide, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	defer func() { _ = peerSide.Close() }()
+	if err := peerSide.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatal(err)
+	}
+
+	params := json.RawMessage(`{"sessionId":"s1","prompt":[{"type":"image","mimeType":"image/png","data":"AA==","name":"shot.png","future":{"nested":{"x":1}}}],"unknownTop":{"keep":true}}`)
+	if _, err := fmt.Fprintf(peerSide, `{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":%s}`+"\n", params); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bufio.NewReader(peerSide).ReadBytes('\n'); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case observation := <-implementation.seen:
+		if observation.err != nil {
+			t.Fatal(observation.err)
+		}
+		if len(observation.prompt.Prompt) != 1 || observation.prompt.Prompt[0].Image == nil {
+			t.Fatalf("typed prompt = %#v, want decoded image", observation.prompt)
+		}
+		var decoded map[string]json.RawMessage
+		if err := json.Unmarshal(observation.raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if string(decoded["unknownTop"]) != `{"keep":true}` {
+			t.Fatalf("unknown top-level field = %s", decoded["unknownTop"])
+		}
+		var prompt []map[string]json.RawMessage
+		if err := json.Unmarshal(decoded["prompt"], &prompt); err != nil {
+			t.Fatal(err)
+		}
+		if len(prompt) != 1 || string(prompt[0]["name"]) != `"shot.png"` || string(prompt[0]["future"]) != `{"nested":{"x":1}}` {
+			t.Fatalf("lossless prompt fields = %#v", prompt)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Prompt callback did not run")
+	}
+}
+
 type connectionAwareAgent struct {
 	minimalAgent
 	seen chan observedAgentConnection

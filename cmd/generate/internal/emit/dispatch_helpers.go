@@ -23,6 +23,13 @@ func jUnmarshalValidate(typeName string) []Code {
 	}
 }
 
+func jRequireInboundKind(kind string) Code {
+	return If(
+		Id("requestErr").Op(":=").Id("requireInboundKind").Call(Id("ctx"), Id(kind), Id("method")),
+		Id("requestErr").Op("!=").Nil(),
+	).Block(Return(Nil(), Id("requestErr")))
+}
+
 // jAgentAssert returns prelude for interface assertions and the receiver name.
 func jAgentAssert(binding ir.MethodBinding, methodName, paramType, respType string, hasResponse bool) ([]Code, string) {
 	switch binding {
