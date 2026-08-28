@@ -6,6 +6,6 @@ import "os/exec"
 
 func configureProcessCommand(*exec.Cmd) {}
 
-func attachProcessTree(cmd *exec.Cmd) (processTree, error) {
+func attachProcessTree(cmd *exec.Cmd, _ <-chan struct{}) (processTree, error) {
 	return directProcessTree{process: cmd.Process}, nil
 }

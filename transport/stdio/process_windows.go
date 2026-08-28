@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -18,6 +17,8 @@ const (
 	createSuspended = 0x00000004
 	createNoWindow  = 0x08000000
 )
+
+var isProcessInJobProc = windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
 
 func configureProcessCommand(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
@@ -34,18 +35,12 @@ type windowsJob struct {
 	terminateErr  error
 }
 
-type jobBasicAccountingInformation struct {
-	totalUserTime             int64
-	totalKernelTime           int64
-	thisPeriodTotalUserTime   int64
-	thisPeriodTotalKernelTime int64
-	totalPageFaultCount       uint32
-	totalProcesses            uint32
-	activeProcesses           uint32
-	totalTerminatedProcesses  uint32
+type jobBasicProcessIDListHeader struct {
+	numberOfAssignedProcesses uint32
+	numberOfProcessIDsInList  uint32
 }
 
-func attachProcessTree(cmd *exec.Cmd) (processTree, error) {
+func attachProcessTree(cmd *exec.Cmd, _ <-chan struct{}) (processTree, error) {
 	if cmd.Process == nil {
 		return nil, errors.New("stdio: started process is unavailable")
 	}
@@ -148,26 +143,140 @@ func (j *windowsJob) terminate() error {
 				j.terminateErr = err
 				return
 			}
-			for {
-				var accounting jobBasicAccountingInformation
-				if err := windows.QueryInformationJobObject(
-					j.handle,
-					windows.JobObjectBasicAccountingInformation,
-					uintptr(unsafe.Pointer(&accounting)),
-					uint32(unsafe.Sizeof(accounting)),
-					nil,
-				); err != nil {
-					j.terminateErr = err
-					return
-				}
-				if accounting.activeProcesses == 0 {
-					return
-				}
-				time.Sleep(time.Millisecond)
-			}
+			// Terminate the job before taking the member snapshot. Once all job
+			// processes have received an unhandleable termination request, none
+			// can create a member between the snapshot and the wait. Members that
+			// are still terminating remain associated with the job and can be
+			// waited through stable process handles.
+			processHandles, processHandleErr := openJobProcessHandles(j.handle)
+			waitErr := waitForWindowsProcesses(processHandles)
+			closeErr := closeWindowsHandles(processHandles)
+			j.terminateErr = errors.Join(processHandleErr, waitErr, closeErr)
 		}
 	})
 	return j.terminateErr
+}
+
+func openJobProcessHandles(job windows.Handle) ([]windows.Handle, error) {
+	processIDs, err := queryJobProcessIDs(job)
+	if err != nil {
+		return nil, err
+	}
+	handles := make([]windows.Handle, 0, len(processIDs))
+	var openErr error
+	for _, processID := range processIDs {
+		handle, err := windows.OpenProcess(
+			windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION,
+			false,
+			processID,
+		)
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			// The process exited after the job snapshot and before OpenProcess.
+			continue
+		}
+		if err != nil {
+			openErr = errors.Join(openErr, fmt.Errorf("stdio: open job process %d: %w", processID, err))
+			continue
+		}
+		inJob, err := processInJob(handle, job)
+		if err != nil {
+			openErr = errors.Join(openErr, fmt.Errorf("stdio: verify job process %d: %w", processID, err))
+			if closeErr := windows.CloseHandle(handle); closeErr != nil {
+				openErr = errors.Join(openErr, closeErr)
+			}
+			continue
+		}
+		if !inJob {
+			// The listed process exited and its PID was recycled before
+			// OpenProcess. Never wait on a process outside the owned job.
+			if closeErr := windows.CloseHandle(handle); closeErr != nil {
+				openErr = errors.Join(openErr, closeErr)
+			}
+			continue
+		}
+		handles = append(handles, handle)
+	}
+	return handles, openErr
+}
+
+func processInJob(process, job windows.Handle) (bool, error) {
+	var result int32
+	succeeded, _, callErr := isProcessInJobProc.Call(
+		uintptr(process),
+		uintptr(job),
+		uintptr(unsafe.Pointer(&result)),
+	)
+	if succeeded == 0 {
+		if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
+			callErr = syscall.EINVAL
+		}
+		return false, callErr
+	}
+	return result != 0, nil
+}
+
+func queryJobProcessIDs(job windows.Handle) ([]uint32, error) {
+	capacity := uint32(16)
+	for {
+		// uintptr storage keeps the variable-length process ID list aligned on
+		// both 32-bit and 64-bit Windows. The two DWORD counters occupy the
+		// first eight bytes and are followed immediately by ULONG_PTR IDs.
+		buffer := make([]uintptr, int(capacity)+2)
+		header := (*jobBasicProcessIDListHeader)(unsafe.Pointer(&buffer[0]))
+		err := windows.QueryInformationJobObject(
+			job,
+			windows.JobObjectBasicProcessIdList,
+			uintptr(unsafe.Pointer(&buffer[0])),
+			uint32(len(buffer))*uint32(unsafe.Sizeof(uintptr(0))),
+			nil,
+		)
+		if err != nil && !errors.Is(err, syscall.ERROR_MORE_DATA) && !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+			return nil, fmt.Errorf("stdio: query job process list: %w", err)
+		}
+		if header.numberOfProcessIDsInList < header.numberOfAssignedProcesses || err != nil {
+			if header.numberOfAssignedProcesses > capacity {
+				capacity = header.numberOfAssignedProcesses
+			} else {
+				capacity *= 2
+			}
+			continue
+		}
+
+		ids := unsafe.Slice(
+			(*uintptr)(unsafe.Add(unsafe.Pointer(&buffer[0]), unsafe.Sizeof(*header))),
+			header.numberOfProcessIDsInList,
+		)
+		processIDs := make([]uint32, len(ids))
+		for index, processID := range ids {
+			processIDs[index] = uint32(processID)
+		}
+		return processIDs, nil
+	}
+}
+
+func waitForWindowsProcesses(handles []windows.Handle) error {
+	var waitErr error
+	for _, handle := range handles {
+		status, err := windows.WaitForSingleObject(handle, windows.INFINITE)
+		if err != nil {
+			waitErr = errors.Join(waitErr, err)
+			continue
+		}
+		if status != windows.WAIT_OBJECT_0 {
+			waitErr = errors.Join(waitErr, fmt.Errorf("stdio: wait for terminated job process returned %#x", status))
+		}
+	}
+	return waitErr
+}
+
+func closeWindowsHandles(handles []windows.Handle) error {
+	var closeErr error
+	for _, handle := range handles {
+		if err := windows.CloseHandle(handle); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		}
+	}
+	return closeErr
 }
 
 func (j *windowsJob) release() error {

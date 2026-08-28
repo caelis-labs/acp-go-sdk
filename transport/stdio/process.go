@@ -3,6 +3,7 @@ package stdio
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -31,14 +32,15 @@ type Process struct {
 	stdout io.ReadCloser
 	tree   processTree
 
-	treeReady chan struct{}
-	waitDone  chan struct{}
-	forceDone chan struct{}
-	waitErr   error
-	forceErr  error
-	closeErr  error
-	stdinErr  error
-	stdoutErr error
+	treeReady   chan struct{}
+	processDone chan struct{}
+	waitDone    chan struct{}
+	forceDone   chan struct{}
+	waitErr     error
+	forceErr    error
+	closeErr    error
+	stdinErr    error
+	stdoutErr   error
 
 	forceRequested atomic.Bool
 	forceOnce      sync.Once
@@ -99,22 +101,28 @@ func Start(ctx context.Context, command Command) (*Process, error) {
 		return nil, err
 	}
 	process := &Process{
-		cmd:       cmd,
-		stdin:     stdin,
-		stdout:    stdout,
-		treeReady: make(chan struct{}),
-		waitDone:  make(chan struct{}),
-		forceDone: make(chan struct{}),
+		cmd:         cmd,
+		stdin:       stdin,
+		stdout:      stdout,
+		treeReady:   make(chan struct{}),
+		processDone: make(chan struct{}),
+		waitDone:    make(chan struct{}),
+		forceDone:   make(chan struct{}),
 	}
 	cmd.Cancel = func() error {
-		return process.forceStop()
+		// Cmd.Wait waits for the CommandContext watcher to return from Cancel.
+		// Tree convergence may itself need the direct child to be reaped, so
+		// run the bounded, once-only stop concurrently and let the internal
+		// waiter join it through tree.release.
+		go func() { _ = process.forceStop() }()
+		return nil
 	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		return nil, err
 	}
-	tree, err := attachProcessTree(cmd)
+	tree, err := attachProcessTree(cmd, process.processDone)
 	if err != nil {
 		process.installTree(directProcessTree{process: cmd.Process})
 		_ = process.forceStop()
@@ -126,6 +134,7 @@ func Start(ctx context.Context, command Command) (*Process, error) {
 	process.installTree(tree)
 	go func() {
 		waitErr := cmd.Wait()
+		close(process.processDone)
 		releaseErr := tree.release()
 		process.waitErr = errors.Join(waitErr, releaseErr)
 		close(process.waitDone)
@@ -159,9 +168,20 @@ func (p *Process) Wait(ctx context.Context) error {
 // stdin closes.
 func (p *Process) Close() error {
 	p.closeOnce.Do(func() {
-		p.closeErr = errors.Join(p.closeInput(), p.forceStop(), p.closeOutput())
+		p.closeErr = errors.Join(
+			stdioOperationError("close stdin", p.closeInput()),
+			stdioOperationError("terminate process tree", p.forceStop()),
+			stdioOperationError("close stdout", p.closeOutput()),
+		)
 	})
 	return p.closeErr
+}
+
+func stdioOperationError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("stdio: %s: %w", operation, err)
 }
 
 // Shutdown closes the child's stdin and waits for a graceful exit. If ctx is

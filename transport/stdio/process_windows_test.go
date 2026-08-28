@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"testing"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestConfigureProcessCommandHidesWindowsConsole(t *testing.T) {
@@ -25,8 +27,23 @@ func TestConfigureProcessCommandHidesWindowsConsole(t *testing.T) {
 	}
 }
 
-func TestJobBasicAccountingInformationLayout(t *testing.T) {
-	if got, want := unsafe.Sizeof(jobBasicAccountingInformation{}), uintptr(48); got != want {
-		t.Fatalf("job accounting information size = %d, want %d", got, want)
+func TestJobProcessIDListHeaderLayout(t *testing.T) {
+	if got, want := unsafe.Sizeof(jobBasicProcessIDListHeader{}), uintptr(8); got != want {
+		t.Fatalf("job process ID list header size = %d, want %d", got, want)
+	}
+}
+
+func TestProcessInJobRejectsUnrelatedProcess(t *testing.T) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(job)
+	inJob, err := processInJob(windows.CurrentProcess(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inJob {
+		t.Fatal("current test process unexpectedly belongs to the empty child job")
 	}
 }

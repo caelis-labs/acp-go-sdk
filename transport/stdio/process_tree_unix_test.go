@@ -1,4 +1,4 @@
-//go:build aix || darwin || dragonfly || freebsd || illumos || linux || netbsd || openbsd || solaris
+//go:build aix || dragonfly || freebsd || illumos || netbsd || openbsd || solaris
 
 package stdio
 
@@ -8,10 +8,14 @@ import (
 	"testing"
 )
 
-func assertProcessExited(t *testing.T, pid int) {
+func captureProcessExitAssertions(t *testing.T, pids []int) func() {
 	t.Helper()
-	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-		return
+	return func() {
+		t.Helper()
+		for _, pid := range pids {
+			if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+				t.Fatalf("process %d is still alive when process-group shutdown returned", pid)
+			}
+		}
 	}
-	t.Fatalf("process %d is still alive when process-group shutdown returned", pid)
 }

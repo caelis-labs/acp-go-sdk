@@ -4,6 +4,7 @@ package stdio
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"sync"
@@ -19,17 +20,18 @@ func configureProcessCommand(cmd *exec.Cmd) {
 }
 
 type unixProcessTree struct {
-	pid     int
-	process *os.Process
-	once    sync.Once
-	err     error
+	pid         int
+	process     *os.Process
+	processDone <-chan struct{}
+	once        sync.Once
+	err         error
 }
 
-func attachProcessTree(cmd *exec.Cmd) (processTree, error) {
+func attachProcessTree(cmd *exec.Cmd, processDone <-chan struct{}) (processTree, error) {
 	if cmd.Process == nil {
 		return nil, errors.New("stdio: started process is unavailable")
 	}
-	return &unixProcessTree{pid: cmd.Process.Pid, process: cmd.Process}, nil
+	return &unixProcessTree{pid: cmd.Process.Pid, process: cmd.Process, processDone: processDone}, nil
 }
 
 func (t *unixProcessTree) terminate() error {
@@ -41,8 +43,19 @@ func (t *unixProcessTree) terminate() error {
 				if errors.Is(err, syscall.ESRCH) {
 					return
 				}
+				if errors.Is(err, syscall.EPERM) {
+					// Darwin may report EPERM while the killed direct child is
+					// waiting to be reaped. Recheck after the one Cmd.Wait owner
+					// has observed its exit; a remaining EPERM then represents a
+					// real descendant permission failure.
+					<-t.processDone
+					err = syscall.Kill(-t.pid, 0)
+					if errors.Is(err, syscall.ESRCH) {
+						return
+					}
+				}
 				if err != nil {
-					t.err = err
+					t.err = fmt.Errorf("wait for process group %d termination: %w", t.pid, err)
 					return
 				}
 				time.Sleep(time.Millisecond)
@@ -56,7 +69,10 @@ func (t *unixProcessTree) terminate() error {
 			t.err = directErr
 			return
 		}
-		t.err = errors.Join(err, directErr)
+		t.err = errors.Join(
+			fmt.Errorf("signal process group %d: %w", t.pid, err),
+			directErr,
+		)
 	})
 	return t.err
 }

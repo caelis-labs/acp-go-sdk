@@ -23,6 +23,24 @@ func TestProcessHelper(t *testing.T) {
 			time.Sleep(time.Hour)
 		}
 	}
+	if os.Getenv("ACP_STDIO_SPAWN_STRESS_HELPER") == "1" {
+		for {
+			grandchild := exec.Command(os.Args[0], "-test.run=^TestProcessHelper$")
+			grandchild.Env = append(os.Environ(),
+				"ACP_STDIO_SPAWN_STRESS_HELPER=0",
+				"ACP_STDIO_GRANDCHILD_HELPER=1",
+			)
+			if err := grandchild.Start(); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "start stress grandchild: %v", err)
+				os.Exit(2)
+			}
+			if err := grandchild.Process.Release(); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "release stress grandchild: %v", err)
+				os.Exit(2)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 	if os.Getenv("ACP_STDIO_TREE_HELPER") == "1" {
 		grandchild := exec.Command(os.Args[0], "-test.run=^TestProcessHelper$")
 		grandchild.Env = append(os.Environ(), "ACP_STDIO_GRANDCHILD_HELPER=1")
@@ -127,6 +145,7 @@ func TestProcessShutdownTerminatesOwnedProcessTree(t *testing.T) {
 	}
 	defer func() { _ = process.Close() }()
 	pids := waitForHelperPIDs(t, pidFile)
+	assertProcessesExited := captureProcessExitAssertions(t, pids)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -141,9 +160,7 @@ func TestProcessShutdownTerminatesOwnedProcessTree(t *testing.T) {
 	if !process.waitComplete() {
 		t.Fatal("forced Shutdown returned before the internal waiter completed")
 	}
-	for _, pid := range pids {
-		assertProcessExited(t, pid)
-	}
+	assertProcessesExited()
 }
 
 func TestStartContextCancellationTerminatesOwnedProcessTree(t *testing.T) {
@@ -163,6 +180,7 @@ func TestStartContextCancellationTerminatesOwnedProcessTree(t *testing.T) {
 	}
 	defer func() { _ = process.Close() }()
 	pids := waitForHelperPIDs(t, pidFile)
+	assertProcessesExited := captureProcessExitAssertions(t, pids)
 	cancelStart()
 
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 2*time.Second)
@@ -170,9 +188,7 @@ func TestStartContextCancellationTerminatesOwnedProcessTree(t *testing.T) {
 	if err := process.Wait(waitCtx); err == nil {
 		t.Fatal("Wait after start-context cancellation succeeded, want forced exit error")
 	}
-	for _, pid := range pids {
-		assertProcessExited(t, pid)
-	}
+	assertProcessesExited()
 }
 
 func TestConcurrentProcessCloseShutdownAndWait(t *testing.T) {
