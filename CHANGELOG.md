@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [v1.1.0-rc.3] - 2026-08-28
+
+### Windows stdio
+
+- File duplication now obtains the source descriptor through
+  `SyscallConn.Control`. This rejects closed files on Windows instead of
+  interpreting their `-1` descriptor as the current-process pseudo handle,
+  and protects the source file from concurrent close while it is duplicated.
+
 ## [v1.1.0-rc.2] - 2026-08-28
 
 ### Handler context and wire semantics
