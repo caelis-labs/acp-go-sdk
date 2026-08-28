@@ -19,8 +19,8 @@ jobs:
           - 1.25.x
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           cache: false
@@ -34,8 +34,8 @@ jobs:
   race-and-static:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.25.x
           cache: false
@@ -46,8 +46,8 @@ jobs:
   windows-stdio:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.25.x
           cache: false
@@ -56,12 +56,12 @@ jobs:
   official-sdk-interop:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.25.x
           cache: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.x
           cache: npm
@@ -69,7 +69,7 @@ jobs:
       - run: rustup toolchain install 1.88.0 --profile minimal --component clippy --component rustfmt
       - run: make interop
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: official-sdk-interop-evidence
           path: |
