@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [v1.1.0-rc.2] - 2026-08-28
+
+### Handler context and wire semantics
+
+- Added `InboundInfoFromContext` so existing raw, extension, and generated
+  handlers can distinguish requests from notifications and inspect the
+  lossless raw JSON-RPC request ID without adding a second ingress path.
+- Added current-connection accessors for agent-side and client-side handlers.
+  Shared Agent or Client implementations can now issue reverse calls through
+  the connection that delivered the current message instead of retaining a
+  global peer.
+- Generated session-info updates now preserve the protocol's
+  absent/null/value distinction for `title` and `updatedAt`. Presence state and
+  generated set/clear/unset methods are available without changing the
+  existing pointer fields or wire schema.
+
+### Transport and stdio
+
+- Added `ErrTransportFailure` and `TransportError`, including stable read/write
+  operation classification and ordinary error unwrapping. Prepared requests
+  continue to report submission certainty independently.
+- `transport/stdio.NewAgentConnection` now gives the SDK independently
+  closable duplicates of process stdin/stdout. The original process-level
+  descriptors remain caller-owned; `DuplicateFile` exposes the same narrow,
+  cross-platform primitive to custom stdio servers.
+
 ## [v1.1.0-rc.1] - 2026-08-25
 
 ### Ordering and stdio

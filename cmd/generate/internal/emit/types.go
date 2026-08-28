@@ -17,6 +17,128 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/util"
 )
 
+type nullablePresenceProp struct {
+	fieldName   string
+	propName    string
+	presentName string
+	definition  *load.Definition
+}
+
+func nullablePresenceProperties(properties map[string]*load.Definition, required map[string]struct{}) []nullablePresenceProp {
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var result []nullablePresenceProp
+	for _, propertyName := range keys {
+		definition := properties[propertyName]
+		if _, ok := required[propertyName]; ok || !includesNull(definition) {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(definition.Description), "set to null to clear") {
+			continue
+		}
+		fieldName := util.ToExportedField(propertyName)
+		result = append(result, nullablePresenceProp{
+			fieldName:   fieldName,
+			propName:    propertyName,
+			presentName: "has" + fieldName,
+			definition:  definition,
+		})
+	}
+	return result
+}
+
+func appendNullablePresenceFields(fields []Code, properties []nullablePresenceProp) []Code {
+	for _, property := range properties {
+		fields = append(fields, Id(property.presentName).Bool().Tag(map[string]string{"json": "-"}))
+	}
+	return fields
+}
+
+func emitNullablePresenceMarshalBody(g *Group, properties []nullablePresenceProp) {
+	for _, property := range properties {
+		rawName := "_" + property.propName + "JSON"
+		g.Var().Id(rawName).Qual("encoding/json", "RawMessage")
+		g.If(Id("a").Dot(property.fieldName).Op("!=").Nil()).BlockFunc(func(h *Group) {
+			h.List(Id("encoded"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(Op("*").Id("a").Dot(property.fieldName))
+			h.If(Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+			h.Id(rawName).Op("=").Id("encoded")
+		}).Else().If(Id("a").Dot(property.presentName)).Block(
+			Id(rawName).Op("=").Qual("encoding/json", "RawMessage").Call(Lit("null")),
+		)
+	}
+
+	fields := []Code{Id("Alias")}
+	values := Dict{Id("Alias"): Id("a")}
+	for _, property := range properties {
+		rawName := "_" + property.propName + "JSON"
+		fields = append(fields, Id(property.fieldName).Qual("encoding/json", "RawMessage").Tag(map[string]string{"json": property.propName + ",omitempty"}))
+		values[Id(property.fieldName)] = Id(rawName)
+	}
+	g.Return(Qual("encoding/json", "Marshal").Call(Struct(fields...).Values(values)))
+}
+
+func emitNullablePresenceUnmarshalAssignments(g *Group, properties []nullablePresenceProp) {
+	for _, property := range properties {
+		g.BlockFunc(func(h *Group) {
+			h.List(Id("_"), Id("present")).Op(":=").Id("m").Index(Lit(property.propName))
+			h.Id("a").Dot(property.presentName).Op("=").Id("present")
+		})
+	}
+}
+
+func emitNullablePresenceAccessors(f *File, name string, properties []nullablePresenceProp) {
+	for _, property := range properties {
+		f.Func().Params(Id("v").Id(name)).Id(property.fieldName+"State").Params().Id("NullableFieldState").Block(
+			If(Id("v").Dot(property.fieldName).Op("!=").Nil()).Block(Return(Id("NullableFieldValue"))),
+			If(Id("v").Dot(property.presentName)).Block(Return(Id("NullableFieldNull"))),
+			Return(Id("NullableFieldAbsent")),
+		)
+		f.Line()
+		f.Func().Params(Id("v").Op("*").Id(name)).Id("Set"+property.fieldName).Params(Id("value").Add(primitiveJenType(property.definition))).Block(
+			Id("v").Dot(property.fieldName).Op("=").Op("&").Id("value"),
+			Id("v").Dot(property.presentName).Op("=").True(),
+		)
+		f.Line()
+		f.Func().Params(Id("v").Op("*").Id(name)).Id("Clear"+property.fieldName).Params().Block(
+			Id("v").Dot(property.fieldName).Op("=").Nil(),
+			Id("v").Dot(property.presentName).Op("=").True(),
+		)
+		f.Line()
+		f.Func().Params(Id("v").Op("*").Id(name)).Id("Unset"+property.fieldName).Params().Block(
+			Id("v").Dot(property.fieldName).Op("=").Nil(),
+			Id("v").Dot(property.presentName).Op("=").False(),
+		)
+		f.Line()
+	}
+}
+
+func emitNullablePresenceJSON(f *File, name string, schema *load.Schema, definition *load.Definition, properties []nullablePresenceProp) {
+	f.Func().Params(Id("v").Id(name)).Id("MarshalJSON").Params().Params(Index().Byte(), Error()).BlockFunc(func(g *Group) {
+		g.Type().Id("Alias").Id(name)
+		g.Id("a").Op(":=").Id("Alias").Call(Id("v"))
+		emitNullablePresenceMarshalBody(g, properties)
+	})
+	f.Line()
+	f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
+		g.Op("*").Id("v").Op("=").Id(name).Values()
+		g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
+		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		emitRequiredPresenceChecks(g, schema, definition)
+		g.Type().Id("Alias").Id(name)
+		g.Var().Id("a").Id("Alias")
+		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		emitNullablePresenceUnmarshalAssignments(g, properties)
+		g.Op("*").Id("v").Op("=").Id(name).Call(Id("a"))
+		g.Return(Nil())
+	})
+	f.Line()
+	emitNullablePresenceAccessors(f, name, properties)
+}
+
 // splitCamelCase splits a CamelCase string into words.
 // Example: "RequestPermissionRequest" -> ["Request", "Permission", "Request"]
 func splitCamelCase(s string) []string {
@@ -355,11 +477,14 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 				}
 				st = append(st, Id(field).Add(fieldType).Tag(map[string]string{"json": tag}))
 			}
+			nullablePresence := nullablePresenceProperties(def.Properties, req)
+			st = appendNullablePresenceFields(st, nullablePresence)
 			f.Type().Id(name).Struct(st...)
 			f.Line()
 
-			// If the struct has any fields with schema defaults, synthesize MarshalJSON.
-			if len(defaults) > 0 {
+			// If the struct has any fields with schema defaults or explicit
+			// absent/null/value semantics, synthesize MarshalJSON.
+			if len(defaults) > 0 || len(nullablePresence) > 0 {
 				// MarshalJSON: coerce nil slices to empty slices before encoding
 				f.Func().Params(Id("v").Id(name)).Id("MarshalJSON").Params().Params(Index().Byte(), Error()).BlockFunc(func(g *Group) {
 					g.Type().Id("Alias").Id(name)
@@ -376,14 +501,18 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 						}
 						// For typed object defaults (non-nilable), we keep Option A: do not inject values on encode.
 					}
-					g.Return(Qual("encoding/json", "Marshal").Call(Id("a")))
+					if len(nullablePresence) > 0 {
+						emitNullablePresenceMarshalBody(g, nullablePresence)
+					} else {
+						g.Return(Qual("encoding/json", "Marshal").Call(Id("a")))
+					}
 				})
 				f.Line()
 			}
 
 			// UnmarshalJSON enforces required-property presence and applies defaults
 			// when a field is missing or null (and the schema doesn't include null).
-			if len(def.Required) > 0 || len(defaults) > 0 {
+			if len(def.Required) > 0 || len(defaults) > 0 || len(nullablePresence) > 0 {
 				f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
 					g.Op("*").Id("v").Op("=").Id(name).Values()
 					g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
@@ -407,11 +536,13 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 							}
 						})
 					}
+					emitNullablePresenceUnmarshalAssignments(g, nullablePresence)
 					g.Op("*").Id("v").Op("=").Id(name).Call(Id("a"))
 					g.Return(Nil())
 				})
 				f.Line()
 			}
+			emitNullablePresenceAccessors(f, name, nullablePresence)
 		case ir.PrimaryType(def) == "string" || ir.PrimaryType(def) == "integer" || ir.PrimaryType(def) == "number" || ir.PrimaryType(def) == "boolean":
 			f.Type().Id(name).Add(primitiveJenType(def))
 			f.Line()
@@ -1390,6 +1521,8 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			}
 		}
 		// Emit struct for inline variants (non-$ref)
+		var variantNullable []nullablePresenceProp
+		var nullableDefinition *load.Definition
 		if (isObj || isNull || v.Title != "") && ref == "" {
 			// DEFENSIVE PROGRAMMING: Verify tname is registered before emitting
 			if !usedTypeNames[tname] {
@@ -1418,6 +1551,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					pkeys = append(pkeys, pk)
 				}
 				sort.Strings(pkeys)
+				variantNullable = nullablePresenceProperties(mergedProps, req)
 				if v.Description != "" {
 					emitDocComment(f, v.Description)
 				}
@@ -1436,6 +1570,17 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 						fieldType = Op("*").Add(jenTypeFor(pDef))
 					}
 					st = append(st, Id(field).Add(fieldType).Tag(map[string]string{"json": tag}))
+				}
+				st = appendNullablePresenceFields(st, variantNullable)
+				if len(variantNullable) > 0 {
+					definition := *v
+					definition.Properties = mergedProps
+					definition.Required = nil
+					for propertyName := range req {
+						definition.Required = append(definition.Required, propertyName)
+					}
+					sort.Strings(definition.Required)
+					nullableDefinition = &definition
 				}
 			} else if !isNull && !isObj && v.Title != "" {
 				// Title-only variants: check if they're extension types
@@ -1465,6 +1610,9 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			}
 			f.Type().Id(tname).Struct(st...)
 			f.Line()
+			if nullableDefinition != nil {
+				emitNullablePresenceJSON(f, tname, schema, nullableDefinition, variantNullable)
+			}
 		skipStructEmit:
 		}
 		variantRequired := append([]string(nil), v.Required...)

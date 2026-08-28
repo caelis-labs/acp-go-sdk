@@ -181,3 +181,24 @@ func TestIncludesNullAnyOfWithoutTopLevelType(t *testing.T) {
 		t.Fatal("nullable anyOf was not recognized")
 	}
 }
+
+func TestNullablePresencePropertiesRequireExplicitClearSemantics(t *testing.T) {
+	properties := map[string]*load.Definition{
+		"title": {
+			Description: "Human-readable title. Set to null to clear.",
+			Type:        []any{"string", "null"},
+		},
+		"ordinary": {
+			Description: "An ordinary nullable field.",
+			Type:        []any{"string", "null"},
+		},
+		"required": {
+			Description: "Set to null to clear.",
+			Type:        []any{"string", "null"},
+		},
+	}
+	got := nullablePresenceProperties(properties, map[string]struct{}{"required": {}})
+	if len(got) != 1 || got[0].propName != "title" || got[0].presentName != "hasTitle" {
+		t.Fatalf("nullable presence properties = %#v", got)
+	}
+}

@@ -32,7 +32,7 @@ schema.unstable.json and v2 schemas are not merged into this package.
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.1
+go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.2
 ~~~
 
 ## Agent side
@@ -59,7 +59,10 @@ return connection.Wait(ctx)
 
 For process stdio, transport/stdio.NewAgentConnection and
 transport/stdio.ServeAgent bind the same transport without placing logs on
-protocol stdout.
+protocol stdout. They use independently closable duplicates of process
+stdin/stdout, so connection shutdown does not close the caller's process-level
+descriptors. Custom stdio servers can use transport/stdio.DuplicateFile before
+transferring a file stream to a Connection.
 
 ## Client side and subprocesses
 
@@ -95,6 +98,18 @@ context cancellation is returned as JSON-RPC -32800.
 JSON-RPC errors are *acp.RequestError; callers can use errors.As to inspect
 Code, Message, and Data.
 
+Transport read and write failures match acp.ErrTransportFailure. Use
+errors.As with *acp.TransportError to inspect the operation and underlying
+cause. For prepared requests this is independent of RequestSubmissionState:
+only RequestSubmissionNotStarted proves that retry cannot duplicate a remote
+effect.
+
+Every inbound handler context exposes acp.InboundInfoFromContext. It reports
+request versus notification and preserves the raw request ID. Generated and
+extension handlers can also retrieve the exact current peer with
+acp.AgentSideConnectionFromContext or acp.ClientSideConnectionFromContext;
+this is safe when one implementation serves multiple connections.
+
 Handlers that must send notifications only after a successful request response
 has reached the wire can register one callback with acp.AfterResponse. The
 callback receives a connection-lifetime context; use it instead of retaining
@@ -109,6 +124,12 @@ reverse requests; notifications sent before the reverse response are processed
 in that ordered call stack before the request returns. A notification handler's
 context is canceled when the handler returns and must not be retained for
 asynchronous work.
+
+SessionInfoUpdate and the session-info SessionUpdate variant preserve absent,
+explicit null, and value states for title and updatedAt. Use TitleState or
+UpdatedAtState to inspect decoded state, and the generated Set, Clear, and
+Unset methods to construct an update. The existing pointer fields remain
+available for value access and direct non-nil assignment.
 
 ## Prepared request lifecycle
 

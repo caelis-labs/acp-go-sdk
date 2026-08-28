@@ -8525,7 +8525,117 @@ type SessionInfoUpdate struct {
 	// Human-readable title for the session. Set to null to clear.
 	Title *string `json:"title,omitempty"`
 	// ISO 8601 timestamp of last activity. Set to null to clear.
-	UpdatedAt *string `json:"updatedAt,omitempty"`
+	UpdatedAt    *string `json:"updatedAt,omitempty"`
+	hasTitle     bool    `json:"-"`
+	hasUpdatedAt bool    `json:"-"`
+}
+
+func (v SessionInfoUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionInfoUpdate
+	var a Alias
+	a = Alias(v)
+	var _titleJSON json.RawMessage
+	if a.Title != nil {
+		encoded, err := json.Marshal(*a.Title)
+		if err != nil {
+			return nil, err
+		}
+		_titleJSON = encoded
+	} else if a.hasTitle {
+		_titleJSON = json.RawMessage("null")
+	}
+	var _updatedAtJSON json.RawMessage
+	if a.UpdatedAt != nil {
+		encoded, err := json.Marshal(*a.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		_updatedAtJSON = encoded
+	} else if a.hasUpdatedAt {
+		_updatedAtJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Title     json.RawMessage `json:"title,omitempty"`
+		UpdatedAt json.RawMessage `json:"updatedAt,omitempty"`
+	}{
+		Alias:     a,
+		Title:     _titleJSON,
+		UpdatedAt: _updatedAtJSON,
+	})
+}
+
+func (v *SessionInfoUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionInfoUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias SessionInfoUpdate
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	{
+		_, present := m["title"]
+		a.hasTitle = present
+	}
+	{
+		_, present := m["updatedAt"]
+		a.hasUpdatedAt = present
+	}
+	*v = SessionInfoUpdate(a)
+	return nil
+}
+
+func (v SessionInfoUpdate) TitleState() NullableFieldState {
+	if v.Title != nil {
+		return NullableFieldValue
+	}
+	if v.hasTitle {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionInfoUpdate) SetTitle(value string) {
+	v.Title = &value
+	v.hasTitle = true
+}
+
+func (v *SessionInfoUpdate) ClearTitle() {
+	v.Title = nil
+	v.hasTitle = true
+}
+
+func (v *SessionInfoUpdate) UnsetTitle() {
+	v.Title = nil
+	v.hasTitle = false
+}
+
+func (v SessionInfoUpdate) UpdatedAtState() NullableFieldState {
+	if v.UpdatedAt != nil {
+		return NullableFieldValue
+	}
+	if v.hasUpdatedAt {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionInfoUpdate) SetUpdatedAt(value string) {
+	v.UpdatedAt = &value
+	v.hasUpdatedAt = true
+}
+
+func (v *SessionInfoUpdate) ClearUpdatedAt() {
+	v.UpdatedAt = nil
+	v.hasUpdatedAt = true
+}
+
+func (v *SessionInfoUpdate) UnsetUpdatedAt() {
+	v.UpdatedAt = nil
+	v.hasUpdatedAt = false
 }
 
 // Capabilities for the 'session/list' method.
@@ -8896,7 +9006,125 @@ type SessionSessionInfoUpdate struct {
 	// Human-readable title for the session. Set to null to clear.
 	Title *string `json:"title,omitempty"`
 	// ISO 8601 timestamp of last activity. Set to null to clear.
-	UpdatedAt *string `json:"updatedAt,omitempty"`
+	UpdatedAt    *string `json:"updatedAt,omitempty"`
+	hasTitle     bool    `json:"-"`
+	hasUpdatedAt bool    `json:"-"`
+}
+
+func (v SessionSessionInfoUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionSessionInfoUpdate
+	a := Alias(v)
+	var _titleJSON json.RawMessage
+	if a.Title != nil {
+		encoded, err := json.Marshal(*a.Title)
+		if err != nil {
+			return nil, err
+		}
+		_titleJSON = encoded
+	} else if a.hasTitle {
+		_titleJSON = json.RawMessage("null")
+	}
+	var _updatedAtJSON json.RawMessage
+	if a.UpdatedAt != nil {
+		encoded, err := json.Marshal(*a.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		_updatedAtJSON = encoded
+	} else if a.hasUpdatedAt {
+		_updatedAtJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Title     json.RawMessage `json:"title,omitempty"`
+		UpdatedAt json.RawMessage `json:"updatedAt,omitempty"`
+	}{
+		Alias:     a,
+		Title:     _titleJSON,
+		UpdatedAt: _updatedAtJSON,
+	})
+}
+
+func (v *SessionSessionInfoUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionSessionInfoUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionSessionInfoUpdate
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	{
+		_, present := m["title"]
+		a.hasTitle = present
+	}
+	{
+		_, present := m["updatedAt"]
+		a.hasUpdatedAt = present
+	}
+	*v = SessionSessionInfoUpdate(a)
+	return nil
+}
+
+func (v SessionSessionInfoUpdate) TitleState() NullableFieldState {
+	if v.Title != nil {
+		return NullableFieldValue
+	}
+	if v.hasTitle {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionSessionInfoUpdate) SetTitle(value string) {
+	v.Title = &value
+	v.hasTitle = true
+}
+
+func (v *SessionSessionInfoUpdate) ClearTitle() {
+	v.Title = nil
+	v.hasTitle = true
+}
+
+func (v *SessionSessionInfoUpdate) UnsetTitle() {
+	v.Title = nil
+	v.hasTitle = false
+}
+
+func (v SessionSessionInfoUpdate) UpdatedAtState() NullableFieldState {
+	if v.UpdatedAt != nil {
+		return NullableFieldValue
+	}
+	if v.hasUpdatedAt {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionSessionInfoUpdate) SetUpdatedAt(value string) {
+	v.UpdatedAt = &value
+	v.hasUpdatedAt = true
+}
+
+func (v *SessionSessionInfoUpdate) ClearUpdatedAt() {
+	v.UpdatedAt = nil
+	v.hasUpdatedAt = true
+}
+
+func (v *SessionSessionInfoUpdate) UnsetUpdatedAt() {
+	v.UpdatedAt = nil
+	v.hasUpdatedAt = false
 }
 
 // Context window and cost update for the session.

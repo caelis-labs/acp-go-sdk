@@ -398,12 +398,12 @@ func (c *Connection) receive() {
 		}
 	}
 
-	cause := fmt.Errorf("%w: EOF", ErrPeerClosed)
+	cause := transportError(TransportOperationRead, fmt.Errorf("%w: %w", ErrPeerClosed, io.EOF))
 	if err := scanner.Err(); err != nil {
 		if strings.Contains(err.Error(), "token too long") {
 			cause = fmt.Errorf("%w: %v", ErrFrameTooLarge, err)
 		} else {
-			cause = fmt.Errorf("%w: %v", ErrPeerClosed, err)
+			cause = transportError(TransportOperationRead, fmt.Errorf("%w: %w", ErrPeerClosed, err))
 		}
 	}
 	c.shutdown(cause)
@@ -626,11 +626,13 @@ func (c *Connection) processWrites() {
 			if err == nil && n != len(write.data) {
 				err = io.ErrShortWrite
 			}
-			write.done <- writeResult{err: err}
 			if err != nil {
-				c.shutdown(fmt.Errorf("acp: write failed: %w", err))
+				failure := transportError(TransportOperationWrite, err)
+				write.done <- writeResult{err: failure}
+				c.shutdown(failure)
 				return
 			}
+			write.done <- writeResult{}
 		}
 	}
 }
@@ -717,6 +719,7 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 		}
 		return
 	}
+	ctx = withInboundInfo(ctx, req)
 
 	var afterResponse *afterResponseState
 	if req.ID != nil {

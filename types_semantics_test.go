@@ -6,6 +6,91 @@ import (
 	"testing"
 )
 
+func TestSessionInfoUpdatePreservesAbsentNullAndValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		input     string
+		wantState NullableFieldState
+		wantTitle string
+	}{
+		{name: "absent", input: `{}`, wantState: NullableFieldAbsent},
+		{name: "null", input: `{"title":null}`, wantState: NullableFieldNull},
+		{name: "value", input: `{"title":"renamed"}`, wantState: NullableFieldValue, wantTitle: "renamed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var update SessionInfoUpdate
+			if err := json.Unmarshal([]byte(test.input), &update); err != nil {
+				t.Fatal(err)
+			}
+			if got := update.TitleState(); got != test.wantState {
+				t.Fatalf("TitleState() = %v, want %v", got, test.wantState)
+			}
+			if test.wantState == NullableFieldValue {
+				if update.Title == nil || *update.Title != test.wantTitle {
+					t.Fatalf("Title = %#v, want %q", update.Title, test.wantTitle)
+				}
+			}
+			encoded, err := json.Marshal(update)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(encoded); got != test.input {
+				t.Fatalf("Marshal() = %s, want %s", got, test.input)
+			}
+		})
+	}
+}
+
+func TestSessionInfoUpdateNullableFieldMutators(t *testing.T) {
+	t.Parallel()
+	var update SessionSessionInfoUpdate
+	update.SessionUpdate = "session_info_update"
+
+	update.SetTitle("renamed")
+	update.ClearUpdatedAt()
+	if update.TitleState() != NullableFieldValue || update.UpdatedAtState() != NullableFieldNull {
+		t.Fatalf("states = %v, %v", update.TitleState(), update.UpdatedAtState())
+	}
+	encoded, err := json.Marshal(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"sessionUpdate":"session_info_update","title":"renamed","updatedAt":null}`; got != want {
+		t.Fatalf("Marshal() = %s, want %s", got, want)
+	}
+
+	update.UnsetTitle()
+	update.SetUpdatedAt("2026-08-28T00:00:00Z")
+	if update.TitleState() != NullableFieldAbsent || update.UpdatedAtState() != NullableFieldValue {
+		t.Fatalf("states = %v, %v", update.TitleState(), update.UpdatedAtState())
+	}
+	encoded, err = json.Marshal(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"sessionUpdate":"session_info_update","updatedAt":"2026-08-28T00:00:00Z"}`; got != want {
+		t.Fatalf("Marshal() = %s, want %s", got, want)
+	}
+}
+
+func TestSessionInfoUpdateDirectPointerAssignmentRemainsCompatible(t *testing.T) {
+	t.Parallel()
+	title := "direct"
+	update := SessionInfoUpdate{Title: &title}
+	if update.TitleState() != NullableFieldValue {
+		t.Fatalf("TitleState() = %v", update.TitleState())
+	}
+	encoded, err := json.Marshal(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"title":"direct"}`; got != want {
+		t.Fatalf("Marshal() = %s, want %s", got, want)
+	}
+}
+
 var (
 	_ *ToolCallId = (&CreateElicitationForm{}).ToolCallId
 	_ *ToolCallId = (&CreateElicitationUrl{}).ToolCallId

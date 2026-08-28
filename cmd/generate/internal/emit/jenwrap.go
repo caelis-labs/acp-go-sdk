@@ -26,6 +26,7 @@ var (
 	Bool          = jen.Bool
 	Any           = jen.Any
 	Map           = jen.Map
+	Struct        = jen.Struct
 	Index         = jen.Index
 	Qual          = jen.Qual
 	Error         = jen.Error

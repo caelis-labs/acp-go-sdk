@@ -84,6 +84,30 @@ func TestConnectionPreservesStringLargeIntegerAndNullIDs(t *testing.T) {
 	}
 }
 
+func TestPeerEOFIsClassifiedAsReadTransportFailure(t *testing.T) {
+	t.Parallel()
+	readSide, peerSide := io.Pipe()
+	connection, err := NewConnectionWithOptions(nil, io.Discard, readSide, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	if err := peerSide.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := waitContext(t)
+	defer cancel()
+	err = connection.Wait(ctx)
+	if !errors.Is(err, ErrTransportFailure) || !errors.Is(err, ErrPeerClosed) || !errors.Is(err, io.EOF) {
+		t.Fatalf("Wait() = %v, want transport, peer-closed, and EOF classifications", err)
+	}
+	var transportErr *TransportError
+	if !errors.As(err, &transportErr) || transportErr.Op != TransportOperationRead {
+		t.Fatalf("TransportError = %#v, want read", transportErr)
+	}
+}
+
 func TestNotificationHandlerCanSendReverseRequest(t *testing.T) {
 	t.Parallel()
 	leftTransport, rightTransport := net.Pipe()

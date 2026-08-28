@@ -297,12 +297,13 @@ func TestPreparedRequestAdmissionRechecksCancellationAndConnectionClose(t *testi
 func TestPreparedRequestWriteFailuresArePossiblySubmitted(t *testing.T) {
 	writeErr := errors.New("write failed")
 	tests := []struct {
-		name   string
-		writer io.Writer
+		name      string
+		writer    io.Writer
+		wantCause error
 	}{
-		{name: "zero byte", writer: lifecycleFixedWriter{}},
-		{name: "zero byte error", writer: lifecycleFixedWriter{err: writeErr}},
-		{name: "partial write", writer: lifecycleFixedWriter{written: 1, err: writeErr}},
+		{name: "zero byte", writer: lifecycleFixedWriter{}, wantCause: io.ErrShortWrite},
+		{name: "zero byte error", writer: lifecycleFixedWriter{err: writeErr}, wantCause: writeErr},
+		{name: "partial write", writer: lifecycleFixedWriter{written: 1, err: writeErr}, wantCause: writeErr},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -324,6 +325,16 @@ func TestPreparedRequestWriteFailuresArePossiblySubmitted(t *testing.T) {
 			}})
 			if err == nil || !RequestMayHaveBeenSubmitted(err) {
 				t.Fatalf("Dispatch error = %v may=%v", err, RequestMayHaveBeenSubmitted(err))
+			}
+			if !errors.Is(err, ErrTransportFailure) {
+				t.Fatalf("Dispatch error = %v, want transport classification", err)
+			}
+			var transportErr *TransportError
+			if !errors.As(err, &transportErr) || transportErr.Op != TransportOperationWrite {
+				t.Fatalf("TransportError = %#v, want write", transportErr)
+			}
+			if !errors.Is(err, test.wantCause) {
+				t.Fatalf("Dispatch error = %v, want cause %v", err, test.wantCause)
 			}
 			if got := abortCalls.Load(); got != 1 {
 				t.Fatalf("Abort calls = %d, want 1", got)

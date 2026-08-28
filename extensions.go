@@ -35,6 +35,7 @@ func isExtensionMethodName(method string) bool {
 }
 
 func (a *AgentSideConnection) handleWithExtensions(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
+	ctx = context.WithValue(ctx, agentSideConnectionContextKey{}, a)
 	if isExtensionMethodName(method) {
 		h, ok := a.agent.(ExtensionMethodHandler)
 		if !ok {
@@ -51,6 +52,7 @@ func (a *AgentSideConnection) handleWithExtensions(ctx context.Context, method s
 }
 
 func (c *ClientSideConnection) handleWithExtensions(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
+	ctx = context.WithValue(ctx, clientSideConnectionContextKey{}, c)
 	if isExtensionMethodName(method) {
 		h, ok := c.client.(ExtensionMethodHandler)
 		if !ok {

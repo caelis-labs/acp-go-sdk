@@ -3,6 +3,7 @@ package stdio
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
@@ -12,7 +13,26 @@ import (
 // Protocol messages are written only to stdout; application logs belong on
 // stderr.
 func NewAgentConnection(agent acp.Agent, opts acp.ConnectionOptions) (*acp.AgentSideConnection, error) {
-	return acp.NewAgentSideConnectionWithOptions(agent, os.Stdout, os.Stdin, opts)
+	return newAgentConnection(agent, os.Stdin, os.Stdout, opts)
+}
+
+func newAgentConnection(agent acp.Agent, processInput, processOutput *os.File, opts acp.ConnectionOptions) (*acp.AgentSideConnection, error) {
+	input, err := DuplicateFile(processInput)
+	if err != nil {
+		return nil, fmt.Errorf("stdio: duplicate process input: %w", err)
+	}
+	output, err := DuplicateFile(processOutput)
+	if err != nil {
+		_ = input.Close()
+		return nil, fmt.Errorf("stdio: duplicate process output: %w", err)
+	}
+	connection, err := acp.NewAgentSideConnectionWithOptions(agent, output, input, opts)
+	if err != nil {
+		_ = input.Close()
+		_ = output.Close()
+		return nil, err
+	}
+	return connection, nil
 }
 
 // ServeAgent runs an Agent over the current process stdin/stdout until the
