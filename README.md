@@ -1,8 +1,12 @@
 # ACP Go SDK
 
-Product-neutral Go implementation of the
-[Agent Client Protocol](https://agentclientprotocol.com), maintained by Caelis
-Labs.
+[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/caelis-labs/acp-go-sdk.svg)](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk)
+
+Product-neutral Go SDK for the
+[Agent Client Protocol (ACP)](https://agentclientprotocol.com), maintained by
+Caelis Labs. The module is published as
+`github.com/caelis-labs/acp-go-sdk`.
 
 The root package is stable ACP wire protocol v1 only. It contains
 schema-generated wire types, typed Agent/Client dispatch, bounded bidirectional
@@ -34,6 +38,16 @@ schema.unstable.json and v2 schemas are not merged into this package.
 ~~~bash
 go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.3
 ~~~
+
+## Releases
+
+Release metadata is committed and pushed before a version tag is created. A
+tag may point only to an exact commit on `main` whose complete CI workflow has
+succeeded. The manual release workflow verifies both conditions before it
+creates an annotated tag; it does not rebuild or modify the selected commit.
+
+See [RELEASING.md](RELEASING.md) for the release procedure and post-publication
+pkg.go.dev checks.
 
 ## Agent side
 

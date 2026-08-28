@@ -1,4 +1,5 @@
-// Package acp implements stable Agent Client Protocol v1.
+// Package acp provides a product-neutral Go SDK for Agent Client Protocol
+// (ACP) v1.
 //
 // Wire types and typed dispatch are generated from the immutable official
 // schema release identified by SchemaTag and SchemaCommit. Connection owns a

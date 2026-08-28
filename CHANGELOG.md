@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Release engineering and documentation
+
+- Added an exact-commit manual release workflow that creates an annotated tag
+  only after the selected `main` commit has a successful push-triggered CI run.
+- Documented the push, CI, tag, Go proxy, and pkg.go.dev publication sequence.
+- Improved the package synopsis and project metadata guidance for ACP and
+  acp-go-sdk discovery on pkg.go.dev and source hosts.
+
 ## [v1.1.0-rc.3] - 2026-08-28
 
 ### Windows stdio
