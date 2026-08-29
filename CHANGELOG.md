@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [v1.1.0] - 2026-08-29
+
+Formal stable release of the prepared-request lifecycle, response/notification
+ordering, lossless compatibility primitives, and cross-platform stdio process
+lifecycle introduced across the v1.1.0 release candidates. Code behavior is
+unchanged from v1.1.0-rc.4.
+
 ## [v1.1.0-rc.4] - 2026-08-28
 
 ### Typed dispatch and lossless compatibility

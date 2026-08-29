@@ -36,7 +36,7 @@ schema.unstable.json and v2 schemas are not merged into this package.
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.1.0-rc.4
+go get github.com/caelis-labs/acp-go-sdk@v1.1.0
 ~~~
 
 ## Releases
