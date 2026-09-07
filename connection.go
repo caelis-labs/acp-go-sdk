@@ -31,6 +31,7 @@ var (
 	ErrRequestQueueFull         = errors.New("acp: inbound request queue full")
 	ErrNotificationQueueFull    = errors.New("acp: inbound notification queue full")
 	ErrAfterResponseUnavailable = errors.New("acp: after-response callback requires an inbound request context")
+	ErrAfterResponseQueueFull   = errors.New("acp: batch after-response callback limit exceeded")
 	ErrAfterResponseRegistered  = errors.New("acp: after-response callback already registered")
 )
 
@@ -171,6 +172,7 @@ type afterResponseState struct {
 	mu       sync.Mutex
 	sealed   bool
 	callback func(context.Context) error
+	reserve  func() error
 }
 
 func (s *afterResponseState) add(callback func(context.Context) error) error {
@@ -181,6 +183,11 @@ func (s *afterResponseState) add(callback func(context.Context) error) error {
 	}
 	if s.callback != nil {
 		return ErrAfterResponseRegistered
+	}
+	if s.reserve != nil {
+		if err := s.reserve(); err != nil {
+			return err
+		}
 	}
 	s.callback = callback
 	return nil
@@ -211,14 +218,20 @@ type queuedRequest struct {
 	reply  responseWriter
 }
 
-type responseWriter func(ctx context.Context, msg anyMessage) error
+type responseCompletion struct {
+	finish   func()
+	callback func(context.Context) error
+}
+
+type responseWriter func(ctx context.Context, msg anyMessage, completion responseCompletion) error
 
 type batchReply struct {
-	c         *Connection
-	mu        sync.Mutex
-	remaining int
-	replies   []anyMessage
-	present   []bool
+	c           *Connection
+	mu          sync.Mutex
+	remaining   int
+	replies     []anyMessage
+	present     []bool
+	completions []responseCompletion
 }
 
 type queuedWrite struct {
@@ -238,7 +251,10 @@ type MethodHandler func(ctx context.Context, method string, params json.RawMessa
 // AfterResponse registers callback to run after the successful response for
 // the current inbound request has been written. At most one callback may be
 // registered per request. It runs synchronously with a connection-lifetime
-// context after the request context has been canceled.
+// context after the request context has been canceled. Batch callbacks run on
+// a dedicated connection worker after the entire response array is written.
+// At most MaxPendingRequests batch callbacks may be reserved at once;
+// registration returns ErrAfterResponseQueueFull when that limit is reached.
 func AfterResponse(ctx context.Context, callback func(context.Context) error) error {
 	if callback == nil {
 		return errors.New("acp: after-response callback is required")
@@ -278,10 +294,12 @@ type Connection struct {
 	lastResponseDelivery  *responseDelivery
 	responseDeliverySlots chan struct{}
 
-	requestQueue      chan queuedRequest
-	notificationQueue chan queuedNotification
-	writeQueue        chan queuedWrite
-	cancelQueue       chan string
+	requestQueue       chan queuedRequest
+	notificationQueue  chan queuedNotification
+	writeQueue         chan queuedWrite
+	cancelQueue        chan string
+	batchCallbackQueue chan func(context.Context) error
+	batchCallbackSlots chan struct{}
 
 	shutdownOnce sync.Once
 	wg           sync.WaitGroup
@@ -350,6 +368,8 @@ func constructConnection(handler MethodHandler, peerInput io.Writer, peerOutput 
 		writeQueue:             make(chan queuedWrite, normalized.MaxQueuedWrites),
 		cancelQueue:            make(chan string, normalized.MaxPendingRequests),
 		waitDone:               make(chan struct{}),
+		batchCallbackQueue:     make(chan func(context.Context) error, normalized.MaxPendingRequests),
+		batchCallbackSlots:     make(chan struct{}, normalized.MaxPendingRequests),
 	}
 	if normalized.Logger != nil {
 		c.logger.Store(normalized.Logger)
@@ -367,8 +387,18 @@ func (c *Connection) start() {
 	for range workerCount {
 		go c.processRequests()
 	}
+	callbacksDone := make(chan struct{})
+	go func() {
+		defer close(callbacksDone)
+		for callback := range c.batchCallbackQueue {
+			c.runAfterResponse(callback)
+			<-c.batchCallbackSlots
+		}
+	}()
 	go func() {
 		c.wg.Wait()
+		close(c.batchCallbackQueue)
+		<-callbacksDone
 		close(c.waitDone)
 	}()
 }
@@ -453,10 +483,11 @@ func (c *Connection) dispatchBatch(frame TransportFrame) bool {
 	var collector *batchReply
 	if replyCount > 0 {
 		collector = &batchReply{
-			c:         c,
-			remaining: replyCount,
-			replies:   make([]anyMessage, replyCount),
-			present:   make([]bool, replyCount),
+			c:           c,
+			remaining:   replyCount,
+			replies:     make([]anyMessage, replyCount),
+			present:     make([]bool, replyCount),
+			completions: make([]responseCompletion, replyCount),
 		}
 	}
 	for i, entry := range frame.entries {
@@ -466,7 +497,7 @@ func (c *Connection) dispatchBatch(frame TransportFrame) bool {
 		}
 		if !entry.ok {
 			if write != nil {
-				_ = write(c.ctx, anyMessage{ID: entry.replyID(), Error: entry.err})
+				_ = write(c.ctx, anyMessage{ID: entry.replyID(), Error: entry.err}, responseCompletion{})
 			}
 			continue
 		}
@@ -481,7 +512,7 @@ func (c *Connection) dispatchMessage(msg anyMessage, write responseWriter) bool 
 	if msg.JSONRPC != "2.0" {
 		c.loggerOrDefault().Warn("discarding frame with invalid jsonrpc version")
 		if write != nil {
-			_ = write(c.ctx, anyMessage{ID: jsonRPCIDOrNull(msg.ID), Error: NewInvalidRequest(nil)})
+			_ = write(c.ctx, anyMessage{ID: jsonRPCIDOrNull(msg.ID), Error: NewInvalidRequest(nil)}, responseCompletion{})
 		} else {
 			c.sendProtocolError(NewInvalidRequest(nil))
 		}
@@ -504,7 +535,7 @@ func (c *Connection) dispatchMessage(msg anyMessage, write responseWriter) bool 
 	default:
 		c.loggerOrDefault().Warn("discarding JSON-RPC frame without id or method")
 		if write != nil {
-			_ = write(c.ctx, anyMessage{ID: jsonRPCIDOrNull(msg.ID), Error: NewInvalidRequest(nil)})
+			_ = write(c.ctx, anyMessage{ID: jsonRPCIDOrNull(msg.ID), Error: NewInvalidRequest(nil)}, responseCompletion{})
 		} else {
 			c.sendProtocolError(NewInvalidRequest(nil))
 		}
@@ -572,17 +603,12 @@ func (c *Connection) processRequests() {
 		case <-c.Done():
 			return
 		case req := <-c.requestQueue:
-			finished := false
-			finish := func() {
-				if finished {
-					return
-				}
-				finished = true
-				c.removeInflight(req.idKey)
-				req.cancel(nil)
-			}
+			var once sync.Once
+			finish := func() { once.Do(func() { c.removeInflight(req.idKey); req.cancel(nil) }) }
 			c.handleInbound(req.ctx, &req.msg, finish, req.reply)
-			finish()
+			if req.reply == nil {
+				finish()
+			}
 		}
 	}
 }
@@ -817,8 +843,12 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 	if c.handler == nil {
 		if req.ID != nil {
 			response.Error = NewMethodNotFound(req.Method)
-			if err := c.writeResponse(c.ctx, write, response); err == nil && responseCommitted != nil {
-				responseCommitted()
+			if write != nil {
+				_ = write(c.ctx, response, responseCompletion{finish: responseCommitted})
+			} else {
+				if err := c.writeResponse(c.ctx, nil, response); err == nil && responseCommitted != nil {
+					responseCommitted()
+				}
 			}
 		}
 		return
@@ -828,6 +858,9 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 	var afterResponse *afterResponseState
 	if req.ID != nil {
 		afterResponse = &afterResponseState{}
+		if write != nil {
+			afterResponse.reserve = c.reserveBatchCallback
+		}
 		ctx = context.WithValue(ctx, afterResponseContextKey{}, afterResponse)
 	}
 
@@ -852,25 +885,50 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 			responseSucceeded = true
 		}
 	}
-	if err := c.writeResponse(c.ctx, write, response); err != nil {
+	if write != nil {
+		// Release the handler before waiting for other entries in this batch.
+		// Only the collector owns the reserved callback from this point onward.
+		if !responseSucceeded && callback != nil {
+			<-c.batchCallbackSlots
+			callback = nil
+		}
+		_ = write(c.ctx, response, responseCompletion{finish: responseCommitted, callback: callback})
+		return
+	}
+	if err := c.writeResponse(c.ctx, nil, response); err != nil {
 		return
 	}
 	if responseCommitted != nil {
 		responseCommitted()
 	}
-	if !responseSucceeded {
-		return
+	if responseSucceeded && callback != nil {
+		c.runAfterResponse(callback)
 	}
-	if callback != nil {
-		if err := callback(c.ctx); err != nil {
-			c.loggerOrDefault().Warn("after-response callback failed", "err", err)
-		}
+}
+
+func (c *Connection) reserveBatchCallback() error {
+	select {
+	case <-c.Done():
+		return c.connectionCause()
+	default:
+	}
+	select {
+	case c.batchCallbackSlots <- struct{}{}:
+		return nil
+	default:
+		return ErrAfterResponseQueueFull
+	}
+}
+
+func (c *Connection) runAfterResponse(callback func(context.Context) error) {
+	if err := callback(c.ctx); err != nil {
+		c.loggerOrDefault().Warn("after-response callback failed", "err", err)
 	}
 }
 
 func (c *Connection) writeResponse(ctx context.Context, write responseWriter, msg anyMessage) error {
 	if write != nil {
-		return write(ctx, msg)
+		return write(ctx, msg, responseCompletion{})
 	}
 	return c.sendMessage(ctx, msg)
 }
@@ -943,17 +1001,18 @@ func encodeBatchResponses(msgs []anyMessage) ([]byte, error) {
 }
 
 func (b *batchReply) writer(index int) responseWriter {
-	return func(_ context.Context, msg anyMessage) error {
-		return b.complete(index, msg)
+	return func(_ context.Context, msg anyMessage, completion responseCompletion) error {
+		return b.complete(index, msg, completion)
 	}
 }
 
-func (b *batchReply) complete(index int, msg anyMessage) error {
+func (b *batchReply) complete(index int, msg anyMessage, completion responseCompletion) error {
 	b.mu.Lock()
 	if index < 0 || index >= len(b.replies) || b.present[index] {
 		b.mu.Unlock()
 		return nil
 	}
+	b.completions[index] = completion
 	b.replies[index] = msg
 	b.present[index] = true
 	b.remaining--
@@ -963,10 +1022,30 @@ func (b *batchReply) complete(index int, msg anyMessage) error {
 		return nil
 	}
 	encoded, err := encodeBatchResponses(b.replies)
-	if err != nil {
-		return err
+	if err == nil {
+		err = b.c.sendEncoded(b.c.ctx, encoded)
 	}
-	return b.c.sendEncoded(b.c.ctx, encoded)
+	// Retire every request before any callback runs. Other entries may have
+	// finished on different workers, but their IDs stay reserved until flush.
+	for _, completion := range b.completions {
+		if completion.finish != nil {
+			completion.finish()
+		}
+	}
+	for _, completion := range b.completions {
+		callback := completion.callback
+		if callback == nil {
+			continue
+		}
+		if err != nil {
+			<-b.c.batchCallbackSlots
+			continue
+		}
+		// Registration reserved capacity, so this cannot block the reader even
+		// when an invalid or overloaded entry is the last response in the batch.
+		b.c.batchCallbackQueue <- callback
+	}
+	return err
 }
 
 // SendRequest sends a JSON-RPC request and decodes its typed result.

@@ -29,6 +29,15 @@ func TestWindowsShutdownConvergesWhileDescendantsSpawn(t *testing.T) {
 		}
 		jobHandle := duplicateWindowsHandle(t, job.handle)
 		waitForJobMembers(t, jobHandle, 4)
+		members, err := queryJobProcessIDs(jobHandle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pids := make([]int, len(members))
+		for i, pid := range members {
+			pids[i] = int(pid)
+		}
+		assertExited := captureProcessExitAssertions(t, pids)
 
 		shutdownCtx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -36,6 +45,7 @@ func TestWindowsShutdownConvergesWhileDescendantsSpawn(t *testing.T) {
 			_ = windows.CloseHandle(jobHandle)
 			t.Fatalf("Shutdown = %v, want context canceled after forced cleanup", err)
 		}
+		assertExited()
 		processIDs, err := queryJobProcessIDs(jobHandle)
 		closeErr := windows.CloseHandle(jobHandle)
 		if err != nil {

@@ -21,6 +21,7 @@ import (
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/acp-go-sdk/transport/stdio"
+ v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 )
 
 func main() {
@@ -39,6 +40,10 @@ func main() {
 	_, _ = request.Wait(context.Background())
 	_, _ = acp.InboundParamsFromContext(context.Background())
 	_ = (*acp.AgentSideConnection).SessionUpdateRaw
+ _ = (*acp.Connection).SendTransportFrame
+ _ = (*v2.AgentSideConnection).CreateElicitation
+ _ = (*v2.ClientSideConnection).LoginAuth
+ _ = v2.RunningUpdate()
 	_ = (*stdio.Process).Shutdown
 	_ = (*stdio.ClientProcess).Shutdown
 	fmt.Println(acp.WireProtocolVersion, block.Text.Text)
