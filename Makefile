@@ -7,6 +7,14 @@ GENERATED := agent_gen.go client_gen.go constants_gen.go helpers_gen.go types_ge
 verify-schema:
 	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/schemaverify -schema ./schema
 
+.PHONY: verify-upstream
+verify-upstream:
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/upstreamdrift
+
+.PHONY: upstream-drift
+upstream-drift:
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/upstreamdrift -remote
+
 .PHONY: generate
 generate: verify-schema
 	cd cmd/generate && GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run .
@@ -37,7 +45,7 @@ vet:
 	cd cmd/generate && GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go vet ./...
 
 .PHONY: check
-check: verify-schema check-generated test vet
+check: verify-schema verify-upstream check-generated test vet
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './.gocache/*' -not -path './.gomodcache/*'))"
 	git diff --check
 

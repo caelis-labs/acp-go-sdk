@@ -51,6 +51,7 @@ Validation
 - fuzz corpus replay
 - generator reproducibility and git diff --exit-code
 - schema checksum verification
+- upstream lock consistency
 - public API diff
 - example builds
 - TypeScript/Rust interop matrix

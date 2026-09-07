@@ -33,6 +33,12 @@ The exact tag object, commit, assets, and hashes are recorded in
 schema/lock.json. Generated stable code uses schema/schema.json only;
 schema.unstable.json and v2 schemas are not merged into this package.
 
+Tracked official identities, including the draft v2 schema tag, are also
+recorded in `upstream/lock.json`. `make verify-upstream` checks that file
+against `schema/lock.json` and `interop/versions.json`. A scheduled workflow
+queries GitHub releases and opens an `upstream-drift` issue when a pin is
+behind.
+
 ## Install
 
 ~~~bash
@@ -231,6 +237,7 @@ notification from the same connection.
 
 ~~~bash
 make verify-schema
+make verify-upstream
 make check-generated
 make test
 make test-race
@@ -265,8 +272,9 @@ The matrix covers Go client to official SDK agent and official SDK client to
 Go agent for TypeScript and Rust. Each direction exercises ordered session
 updates, a reverse permission request, `session/cancel`, and the distinct
 `$/cancel_request` / JSON-RPC `-32800` path. Exact SDK identities and toolchain
-requirements are recorded in `interop/versions.json`; machine-readable run
-evidence is written under `.artifacts/interop/` and uploaded by CI.
+requirements are recorded in `interop/versions.json` and `upstream/lock.json`;
+machine-readable run evidence is written under `.artifacts/interop/` and
+uploaded by CI.
 
 See `interop/README.md` for harness boundaries and scenario definitions.
 

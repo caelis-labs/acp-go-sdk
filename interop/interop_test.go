@@ -169,10 +169,10 @@ func TestDependencyLocks(t *testing.T) {
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "2.0.0" ||
-		locked.Rust.Tag != "v2.0.0" ||
-		locked.Rust.Commit != "ce023279824149008659dd8f4b8b70266a7e8210" ||
-		locked.Rust.Checksum != "6d87bc7769eba641753ba5dc52f73ec3765d51022c6753bf040967125ddc86a8" ||
+		locked.Rust.Version != "2.1.0" ||
+		locked.Rust.Tag != "v2.1.0" ||
+		locked.Rust.Commit != "726c5030bfaa88cfdac2fb1f71a63abb331ce586" ||
+		locked.Rust.Checksum != "6395d81d91fd2ee93f48ea31cfc511356e75b9061ca0389cefd0308507cc11ba" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}
@@ -189,7 +189,7 @@ func TestDependencyLocks(t *testing.T) {
 		t.Fatalf("TypeScript package-lock does not match versions.json: %+v", sdk)
 	}
 
-	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.toml"), `agent-client-protocol = "=2.0.0"`)
+	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.toml"), fmt.Sprintf(`agent-client-protocol = "=%s"`, locked.Rust.Version))
 	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "rust-toolchain.toml"), `channel = "1.88.0"`)
 	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.lock"), fmt.Sprintf(`name = %q
 version = %q

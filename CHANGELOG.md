@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Maintenance
+
+- Pinned official Rust SDK interoperability to `v2.1.0`.
+- Added `upstream/lock.json` and a scheduled GitHub Action that opens an
+  `upstream-drift` issue when official schema or SDK releases move ahead of
+  the committed pins.
+
 ## [v1.1.0] - 2026-08-29
 
 Formal stable release of the prepared-request lifecycle, response/notification
