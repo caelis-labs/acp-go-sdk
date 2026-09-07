@@ -10,6 +10,9 @@ type (
 	File  = jen.File
 )
 
+// PackageName is the Go package written into generated files.
+var PackageName = "acp"
+
 var (
 	NewFile       = jen.NewFile
 	Id            = jen.Id

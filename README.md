@@ -40,6 +40,11 @@ against `schema/lock.json` and `interop/versions.json`. A scheduled workflow
 queries GitHub releases and opens an `upstream-drift` issue when a pin is
 behind.
 
+Draft ACP v2 lives in `experimental/v2`. It is generated from
+`schema-v2.0.0-alpha.3` and is not a stable API. `session/prompt` acknowledges
+acceptance only; running/idle/requires_action are `session/update` state
+updates. Do not import this package from the stable root.
+
 ## Install
 
 ~~~bash

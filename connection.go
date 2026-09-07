@@ -310,6 +310,19 @@ func NewConnectionWithOptions(handler MethodHandler, peerInput io.Writer, peerOu
 	return c, nil
 }
 
+// NewUnstartedConnection constructs a bounded connection without starting I/O
+// workers. Call Start after reverse-call receivers are assigned. Experimental
+// versioned surfaces use this to avoid a first-frame race.
+func NewUnstartedConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ConnectionOptions) (*Connection, error) {
+	return constructConnection(handler, peerInput, peerOutput, opts)
+}
+
+// Start launches connection-owned I/O workers. It must be called exactly once
+// after NewUnstartedConnection.
+func (c *Connection) Start() {
+	c.start()
+}
+
 func constructConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ConnectionOptions) (*Connection, error) {
 	if peerInput == nil || peerOutput == nil {
 		return nil, errors.New("acp: peer input and output are required")

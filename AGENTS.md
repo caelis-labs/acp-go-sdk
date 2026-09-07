@@ -22,6 +22,7 @@ MUST
 - Provide fuzz tests for JSON decoding, request IDs, unions and framing.
 - Prove bidirectional interoperability with official TypeScript and Rust SDKs.
 - Keep stable, experimental/v1 and experimental/v2 generated surfaces isolated.
+- Generate experimental/v2 from the pinned schema-v2* tag only.
 - Preserve license history, NOTICE and upstream attribution.
 
 MUST NOT

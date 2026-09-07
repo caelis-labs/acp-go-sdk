@@ -13,9 +13,14 @@ import (
 func main() {
 	var schemaDirFlag string
 	var outDirFlag string
+	var packageFlag string
+	var dispatchFlag bool
 	flag.StringVar(&schemaDirFlag, "schema", "", "path to schema directory (defaults to <repo>/schema)")
 	flag.StringVar(&outDirFlag, "out", "", "output directory for generated go files (defaults to <repo>)")
+	flag.StringVar(&packageFlag, "package", "acp", "Go package name written into generated files")
+	flag.BoolVar(&dispatchFlag, "dispatch", true, "emit agent_gen.go and client_gen.go")
 	flag.Parse()
+	emit.PackageName = packageFlag
 
 	repoRoot := findRepoRoot()
 	schemaDir := schemaDirFlag
@@ -48,8 +53,10 @@ func main() {
 	if err := emit.WriteTypesJen(outDir, schema, meta); err != nil {
 		panic(err)
 	}
-	if err := emit.WriteDispatchJen(outDir, schema, meta); err != nil {
-		panic(err)
+	if dispatchFlag {
+		if err := emit.WriteDispatchJen(outDir, schema, meta); err != nil {
+			panic(err)
+		}
 	}
 
 	// Emit helpers after types so they can reference generated structs.
