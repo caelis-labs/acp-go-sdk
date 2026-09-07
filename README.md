@@ -10,7 +10,8 @@ Caelis Labs. The module is published as
 
 The root package is stable ACP wire protocol v1 only. It contains
 schema-generated wire types, typed Agent/Client dispatch, bounded bidirectional
-JSON-RPC, cancellation, and the stable stdio NDJSON transport. It does not
+JSON-RPC (including lossless batch frames), cancellation, and the stable stdio
+NDJSON transport. It does not
 contain an agent runtime, persistence, authorization, replay, UI projection, or
 product-specific extensions.
 
@@ -124,6 +125,11 @@ connection-owned goroutines.
 Both string and numeric JSON-RPC request IDs are matched without float64
 conversion. $/cancel_request cancels the inbound request context and normal
 context cancellation is returned as JSON-RPC -32800.
+
+Each NDJSON line is one transport frame: a single JSON-RPC object, a non-empty
+batch array, or a malformed raw value. Incoming batches keep that boundary;
+response-bearing entries are answered with one response array.
+SendTransportFrame forwards a complete frame for relays without flattening.
 
 JSON-RPC errors are *acp.RequestError; callers can use errors.As to inspect
 Code, Message, and Data.

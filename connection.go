@@ -208,6 +208,17 @@ type queuedRequest struct {
 	idKey  string
 	ctx    context.Context
 	cancel context.CancelCauseFunc
+	reply  responseWriter
+}
+
+type responseWriter func(ctx context.Context, msg anyMessage) error
+
+type batchReply struct {
+	c         *Connection
+	mu        sync.Mutex
+	remaining int
+	replies   []anyMessage
+	present   []bool
 }
 
 type queuedWrite struct {
@@ -372,41 +383,12 @@ func (c *Connection) receive() {
 	scanner.Buffer(make([]byte, 0, initialSize), c.opts.MaxFrameSize)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			continue
 		}
-
-		var msg anyMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			c.loggerOrDefault().Warn("discarding malformed JSON-RPC frame", "err", err)
-			c.sendProtocolError(NewParseError(nil))
-			continue
-		}
-		if msg.JSONRPC != "2.0" {
-			c.loggerOrDefault().Warn("discarding frame with invalid jsonrpc version")
-			c.sendProtocolError(NewInvalidRequest(nil))
-			continue
-		}
-
-		if msg.ID == nil && msg.Method == "$/cancel_request" {
-			c.handleCancelRequest(&msg)
-			continue
-		}
-
-		switch {
-		case msg.ID != nil && msg.Method == "":
-			c.handleResponse(&msg)
-		case msg.Method != "" && msg.ID != nil:
-			c.enqueueRequest(msg)
-		case msg.Method != "":
-			if !c.enqueueNotification(msg) {
-				c.shutdown(ErrNotificationQueueFull)
-				return
-			}
-		default:
-			c.loggerOrDefault().Warn("discarding JSON-RPC frame without id or method")
-			c.sendProtocolError(NewInvalidRequest(nil))
+		if !c.dispatchFrame(ParseTransportFrame(line)) {
+			return
 		}
 	}
 
@@ -421,15 +403,111 @@ func (c *Connection) receive() {
 	c.shutdown(cause)
 }
 
+func (c *Connection) dispatchFrame(frame TransportFrame) bool {
+	switch frame.Kind {
+	case FrameKindMalformed:
+		err := frame.err
+		if err == nil {
+			err = NewParseError(nil)
+		}
+		if err.Code == -32700 {
+			c.loggerOrDefault().Warn("discarding malformed JSON-RPC frame")
+		} else {
+			c.loggerOrDefault().Warn("discarding invalid JSON-RPC frame")
+		}
+		c.sendProtocolError(err)
+		return true
+	case FrameKindSingle:
+		return c.dispatchMessage(frame.single, nil)
+	case FrameKindBatch:
+		return c.dispatchBatch(frame)
+	default:
+		c.sendProtocolError(NewInvalidRequest(nil))
+		return true
+	}
+}
+
+func (c *Connection) dispatchBatch(frame TransportFrame) bool {
+	replyIndexes := make([]int, len(frame.entries))
+	replyCount := 0
+	for i, entry := range frame.entries {
+		replyIndexes[i] = -1
+		if entry.needsReply() {
+			replyIndexes[i] = replyCount
+			replyCount++
+		}
+	}
+	var collector *batchReply
+	if replyCount > 0 {
+		collector = &batchReply{
+			c:         c,
+			remaining: replyCount,
+			replies:   make([]anyMessage, replyCount),
+			present:   make([]bool, replyCount),
+		}
+	}
+	for i, entry := range frame.entries {
+		var write responseWriter
+		if slot := replyIndexes[i]; slot >= 0 && collector != nil {
+			write = collector.writer(slot)
+		}
+		if !entry.ok {
+			if write != nil {
+				_ = write(c.ctx, anyMessage{ID: entry.replyID(), Error: entry.err})
+			}
+			continue
+		}
+		if !c.dispatchMessage(entry.msg, write) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Connection) dispatchMessage(msg anyMessage, write responseWriter) bool {
+	if msg.JSONRPC != "2.0" {
+		c.loggerOrDefault().Warn("discarding frame with invalid jsonrpc version")
+		if write != nil {
+			_ = write(c.ctx, anyMessage{ID: jsonRPCIDOrNull(msg.ID), Error: NewInvalidRequest(nil)})
+		} else {
+			c.sendProtocolError(NewInvalidRequest(nil))
+		}
+		return true
+	}
+	if msg.ID == nil && msg.Method == jsonRPCMethodCancelRequest {
+		c.handleCancelRequest(&msg)
+		return true
+	}
+	switch {
+	case msg.ID != nil && msg.Method == "":
+		c.handleResponse(&msg)
+	case msg.Method != "" && msg.ID != nil:
+		c.enqueueRequest(msg, write)
+	case msg.Method != "":
+		if !c.enqueueNotification(msg) {
+			c.shutdown(ErrNotificationQueueFull)
+			return false
+		}
+	default:
+		c.loggerOrDefault().Warn("discarding JSON-RPC frame without id or method")
+		if write != nil {
+			_ = write(c.ctx, anyMessage{ID: jsonRPCIDOrNull(msg.ID), Error: NewInvalidRequest(nil)})
+		} else {
+			c.sendProtocolError(NewInvalidRequest(nil))
+		}
+	}
+	return true
+}
+
 func (c *Connection) sendProtocolError(reqErr *RequestError) {
 	nullID := json.RawMessage("null")
 	_ = c.sendMessage(c.ctx, anyMessage{ID: &nullID, Error: reqErr})
 }
 
-func (c *Connection) enqueueRequest(msg anyMessage) {
+func (c *Connection) enqueueRequest(msg anyMessage, write responseWriter) {
 	idKey, err := canonicalJSONRPCIDKey(*msg.ID)
 	if err != nil {
-		_ = c.sendMessage(c.ctx, anyMessage{ID: msg.ID, Error: NewInvalidRequest(map[string]any{"error": "invalid request id"})})
+		_ = c.writeResponse(c.ctx, write, anyMessage{ID: msg.ID, Error: NewInvalidRequest(map[string]any{"error": "invalid request id"})})
 		return
 	}
 
@@ -438,22 +516,23 @@ func (c *Connection) enqueueRequest(msg anyMessage) {
 	if _, duplicate := c.inflight[idKey]; duplicate {
 		c.mu.Unlock()
 		cancel(nil)
-		_ = c.sendMessage(c.ctx, anyMessage{ID: msg.ID, Error: NewInvalidRequest(map[string]any{"error": "duplicate request id"})})
+		_ = c.writeResponse(c.ctx, write, anyMessage{ID: msg.ID, Error: NewInvalidRequest(map[string]any{"error": "duplicate request id"})})
 		return
 	}
 	c.inflight[idKey] = cancel
 	c.mu.Unlock()
 
-	req := queuedRequest{msg: msg, idKey: idKey, ctx: reqCtx, cancel: cancel}
+	req := queuedRequest{msg: msg, idKey: idKey, ctx: reqCtx, cancel: cancel, reply: write}
 	select {
 	case c.requestQueue <- req:
 	case <-c.Done():
 		c.removeInflight(idKey)
 		cancel(context.Cause(c.ctx))
+		_ = c.writeResponse(c.ctx, write, anyMessage{ID: msg.ID, Error: toReqErr(c.connectionCause())})
 	default:
 		c.removeInflight(idKey)
 		cancel(ErrRequestQueueFull)
-		_ = c.sendMessage(c.ctx, anyMessage{ID: msg.ID, Error: NewServerOverloaded(map[string]any{"error": ErrRequestQueueFull.Error()})})
+		_ = c.writeResponse(c.ctx, write, anyMessage{ID: msg.ID, Error: NewServerOverloaded(map[string]any{"error": ErrRequestQueueFull.Error()})})
 	}
 }
 
@@ -489,7 +568,7 @@ func (c *Connection) processRequests() {
 				c.removeInflight(req.idKey)
 				req.cancel(nil)
 			}
-			c.handleInbound(req.ctx, &req.msg, finish)
+			c.handleInbound(req.ctx, &req.msg, finish, req.reply)
 			finish()
 		}
 	}
@@ -520,7 +599,7 @@ func (c *Connection) processNotification(queued queuedNotification) {
 	}
 	frame := &notificationFrame{seq: queued.seq, active: true}
 	handlerCtx, cancel := context.WithCancel(context.WithValue(c.ctx, notificationSequenceContextKey{}, frame))
-	c.handleInbound(handlerCtx, &queued.msg, nil)
+	c.handleInbound(handlerCtx, &queued.msg, nil, nil)
 	frame.mu.Lock()
 	frame.active = false
 	frame.mu.Unlock()
@@ -720,12 +799,12 @@ func (c *Connection) handleCancelRequest(msg *anyMessage) {
 	}
 }
 
-func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, responseCommitted func()) {
+func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, responseCommitted func(), write responseWriter) {
 	response := anyMessage{ID: req.ID}
 	if c.handler == nil {
 		if req.ID != nil {
 			response.Error = NewMethodNotFound(req.Method)
-			if err := c.sendMessage(c.ctx, response); err == nil && responseCommitted != nil {
+			if err := c.writeResponse(c.ctx, write, response); err == nil && responseCommitted != nil {
 				responseCommitted()
 			}
 		}
@@ -760,7 +839,7 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 			responseSucceeded = true
 		}
 	}
-	if err := c.sendMessage(c.ctx, response); err != nil {
+	if err := c.writeResponse(c.ctx, write, response); err != nil {
 		return
 	}
 	if responseCommitted != nil {
@@ -776,12 +855,32 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage, respons
 	}
 }
 
+func (c *Connection) writeResponse(ctx context.Context, write responseWriter, msg anyMessage) error {
+	if write != nil {
+		return write(ctx, msg)
+	}
+	return c.sendMessage(ctx, msg)
+}
+
 func (c *Connection) sendMessage(ctx context.Context, msg anyMessage) error {
 	encoded, err := encodeMessage(msg)
 	if err != nil {
 		return err
 	}
+	return c.sendEncoded(ctx, encoded)
+}
 
+// SendTransportFrame writes one complete JSON-RPC transport value. Relays use
+// this to preserve batch boundaries instead of flattening entries.
+func (c *Connection) SendTransportFrame(ctx context.Context, frame TransportFrame) error {
+	encoded, err := frame.Encode()
+	if err != nil {
+		return err
+	}
+	return c.sendEncoded(ctx, encoded)
+}
+
+func (c *Connection) sendEncoded(ctx context.Context, encoded []byte) error {
 	write := queuedWrite{ctx: ctx, data: encoded, done: make(chan writeResult, 1)}
 	select {
 	case <-ctx.Done():
@@ -802,12 +901,59 @@ func (c *Connection) sendMessage(ctx context.Context, msg anyMessage) error {
 }
 
 func encodeMessage(msg anyMessage) ([]byte, error) {
-	msg.JSONRPC = "2.0"
-	encoded, err := json.Marshal(msg)
+	encoded, err := marshalMessage(msg)
 	if err != nil {
 		return nil, err
 	}
 	return append(encoded, '\n'), nil
+}
+
+func marshalMessage(msg anyMessage) ([]byte, error) {
+	msg.JSONRPC = "2.0"
+	return json.Marshal(msg)
+}
+
+func encodeBatchResponses(msgs []anyMessage) ([]byte, error) {
+	parts := make([]json.RawMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		encoded, err := marshalMessage(msg)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, encoded)
+	}
+	encoded, err := json.Marshal(parts)
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, '\n'), nil
+}
+
+func (b *batchReply) writer(index int) responseWriter {
+	return func(_ context.Context, msg anyMessage) error {
+		return b.complete(index, msg)
+	}
+}
+
+func (b *batchReply) complete(index int, msg anyMessage) error {
+	b.mu.Lock()
+	if index < 0 || index >= len(b.replies) || b.present[index] {
+		b.mu.Unlock()
+		return nil
+	}
+	b.replies[index] = msg
+	b.present[index] = true
+	b.remaining--
+	flush := b.remaining == 0
+	b.mu.Unlock()
+	if !flush {
+		return nil
+	}
+	encoded, err := encodeBatchResponses(b.replies)
+	if err != nil {
+		return err
+	}
+	return b.c.sendEncoded(b.c.ctx, encoded)
 }
 
 // SendRequest sends a JSON-RPC request and decodes its typed result.

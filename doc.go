@@ -3,7 +3,8 @@
 //
 // Wire types and typed dispatch are generated from the immutable official
 // schema release identified by SchemaTag and SchemaCommit. Connection owns a
-// bounded, concurrent JSON-RPC 2.0 session over newline-delimited JSON.
+// bounded, concurrent JSON-RPC 2.0 session over newline-delimited JSON,
+// including lossless batch frames.
 // PreparedRequest provides a product-neutral outbound request lifecycle with
 // separate dispatch and response contexts, conservative transport submission
 // classification, decode-independent response observation, and explicit local

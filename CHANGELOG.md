@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### JSON-RPC transport
+
+- Ingress now classifies each NDJSON value as a single JSON-RPC object, a
+  non-empty batch, or a malformed raw value. Incoming batches are dispatched
+  as logical messages but answered with one response array, and
+  `SendTransportFrame` forwards a complete frame so relays can preserve the
+  batch boundary.
+
 ### Maintenance
 
 - Pinned official Rust SDK interoperability to `v2.1.0`.
