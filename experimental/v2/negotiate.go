@@ -11,11 +11,16 @@ import (
 
 // ProtocolVersionFromInitialize reads protocolVersion from initialize params.
 func ProtocolVersionFromInitialize(params json.RawMessage) (ProtocolVersion, error) {
-	var req InitializeRequest
+	var req struct {
+		ProtocolVersion *ProtocolVersion `json:"protocolVersion"`
+	}
 	if err := json.Unmarshal(params, &req); err != nil {
 		return 0, err
 	}
-	return req.ProtocolVersion, nil
+	if req.ProtocolVersion == nil {
+		return 0, fmt.Errorf("protocolVersion is required")
+	}
+	return *req.ProtocolVersion, nil
 }
 
 // SelectProtocolVersion returns the v2 version when the peer asked for it.
@@ -33,39 +38,57 @@ type ProtocolRouter struct {
 	V1 acp.MethodHandler
 	V2 acp.MethodHandler
 
-	mu       sync.Mutex
-	selected ProtocolVersion
+	mu          sync.Mutex
+	selected    ProtocolVersion
+	initialized bool
 }
 
 // Handle implements acp.MethodHandler.
 func (r *ProtocolRouter) Handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
-	if method == AgentMethodInitialize {
-		requested, err := ProtocolVersionFromInitialize(params)
-		if err != nil {
-			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
-		}
+	if method != AgentMethodInitialize {
 		r.mu.Lock()
-		r.selected = requested
+		selected := r.selected
 		r.mu.Unlock()
+		switch selected {
+		case 1:
+			return r.V1(ctx, method, params)
+		case ProtocolVersionNumber:
+			return r.V2(ctx, method, params)
+		default:
+			return nil, acp.NewInvalidRequest(map[string]any{"error": "initialize must succeed before other methods"})
+		}
+	}
+	if info, ok := acp.InboundInfoFromContext(ctx); ok && info.Kind != acp.InboundRequest {
+		return nil, acp.NewMethodNotFound(method)
+	}
+	requested, err := ProtocolVersionFromInitialize(params)
+	if err != nil {
+		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	var handler acp.MethodHandler
+	switch requested {
+	case 1:
+		handler = r.V1
+	case ProtocolVersionNumber:
+		handler = r.V2
+	default:
+		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unsupported protocol version %d", requested)})
+	}
+	if handler == nil {
+		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("protocol version %d is not configured", requested)})
 	}
 	r.mu.Lock()
-	selected := r.selected
-	r.mu.Unlock()
-	switch selected {
-	case ProtocolVersionNumber:
-		if r.V2 == nil {
-			return nil, acp.NewInternalError(map[string]any{"error": "v2 handler is not configured"})
-		}
-		return r.V2(ctx, method, params)
-	case 1:
-		if r.V1 == nil {
-			return nil, acp.NewInternalError(map[string]any{"error": "v1 handler is not configured"})
-		}
-		return r.V1(ctx, method, params)
-	default:
-		if method != AgentMethodInitialize {
-			return nil, acp.NewInvalidRequest(map[string]any{"error": "initialize is required before other methods"})
-		}
-		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unsupported protocol version %d", selected)})
+	if r.selected != 0 || r.initialized {
+		r.mu.Unlock()
+		return nil, acp.NewInvalidRequest(map[string]any{"error": "initialize has already been received"})
 	}
+	r.initialized = true
+	r.mu.Unlock()
+	result, reqErr := handler(ctx, method, params)
+	r.mu.Lock()
+	if reqErr == nil {
+		r.selected = requested
+	}
+	r.mu.Unlock()
+	return result, reqErr
 }

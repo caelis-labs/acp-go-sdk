@@ -2,7 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [v1.2.0] - 2026-09-07
+
+### Fixes
+
+- Batch `AfterResponse` callbacks run only after the complete response array
+  is written. A bounded callback worker allows reverse requests without
+  blocking the receive loop or starving single-worker request handling.
+- The upstream drift workflow executes a built binary so the drift exit code
+  reaches Issue creation and updates.
+- Experimental v2 dispatch preserves structured JSON-RPC errors and cancellation
+  codes, rejects request/notification mismatches before invoking handlers, and
+  supports elicitation creation/completion and all declared outbound methods.
+- Windows stdio retains process handles across Job Object termination and waits
+  for the active process count to reach zero before reporting tree shutdown.
+- Protocol routing accepts stable v1 initialize envelopes and locks the first
+  initialization attempt, rejecting concurrent or repeated initialization.
 
 ### Experimental ACP v2
 

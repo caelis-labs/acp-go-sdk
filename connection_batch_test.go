@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -244,5 +245,192 @@ func TestSendTransportFramePreservesBatchBoundary(t *testing.T) {
 	var decoded []json.RawMessage
 	if err := json.Unmarshal(line, &decoded); err != nil || len(decoded) != 2 {
 		t.Fatalf("relayed frame was flattened: %s", line)
+	}
+}
+
+func TestBatchAfterResponseWaitsForArrayAndAllowsReverseRequest(t *testing.T) {
+	t.Parallel()
+	a, b := net.Pipe()
+	opts := testOptions()
+	opts.MaxHandlerConcurrency = 1
+	callbacks := make(chan error, 2)
+	var connection *Connection
+	handler := func(ctx context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+		if err := AfterResponse(ctx, func(cbCtx context.Context) error {
+			if ctx.Err() == nil {
+				callbacks <- errors.New("request context is still active")
+				return nil
+			}
+			_, err := SendRequest[any](connection, cbCtx, "reverse", nil)
+			callbacks <- err
+			return err
+		}); err != nil {
+			return nil, toReqErr(err)
+		}
+		return method, nil
+	}
+	var err error
+	connection, err = NewUnstartedConnection(handler, a, a, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.Start()
+	defer func() { _ = connection.Close() }()
+	defer func() { _ = b.Close() }()
+	if err := b.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(b, `[{"jsonrpc":"2.0","id":1,"method":"one"},{"jsonrpc":"2.0","id":2,"method":"two"}]`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(b)
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replies []anyMessage
+	if err := json.Unmarshal(line, &replies); err != nil || len(replies) != 2 {
+		t.Fatalf("first frame must be response array: %s (%v)", line, err)
+	}
+	for range 2 {
+		line, err = reader.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req anyMessage
+		if err := json.Unmarshal(line, &req); err != nil || req.Method != "reverse" {
+			t.Fatalf("reverse: %s (%v)", line, err)
+		}
+		response, err := encodeMessage(anyMessage{ID: req.ID, Result: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.Write(response); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-callbacks:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(testTimeout):
+			t.Fatal("callback stalled")
+		}
+	}
+}
+
+func TestBatchCallbackReservationIsBounded(t *testing.T) {
+	t.Parallel()
+	input, keepOpen := io.Pipe()
+	defer func() { _ = keepOpen.Close() }()
+	opts := testOptions()
+	opts.MaxPendingRequests = 1
+	c, err := NewConnectionWithOptions(nil, io.Discard, input, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	first := &afterResponseState{reserve: c.reserveBatchCallback}
+	if err := first.add(func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	second := &afterResponseState{reserve: c.reserveBatchCallback}
+	if err := second.add(func(context.Context) error { return nil }); !errors.Is(err, ErrAfterResponseQueueFull) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBatchWriteFailureDoesNotRunCallbacks(t *testing.T) {
+	t.Parallel()
+	input, keepOpen := io.Pipe()
+	defer func() { _ = keepOpen.Close() }()
+	c, err := NewConnectionWithOptions(nil, failBatchWriter{}, input, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	called := make(chan struct{}, 1)
+	b := &batchReply{c: c, remaining: 2, replies: make([]anyMessage, 2), present: make([]bool, 2), completions: make([]responseCompletion, 2)}
+	if err := c.reserveBatchCallback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.complete(0, anyMessage{Result: json.RawMessage(`{}`)}, responseCompletion{callback: func(context.Context) error { called <- struct{}{}; return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.complete(1, anyMessage{Error: NewInvalidRequest(nil)}, responseCompletion{}); err == nil {
+		t.Fatal("expected write failure")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	_ = c.Wait(ctx)
+	select {
+	case <-called:
+		t.Fatal("callback ran after failed write")
+	default:
+	}
+	if len(c.batchCallbackSlots) != 0 {
+		t.Fatal("callback reservation leaked")
+	}
+}
+
+type failBatchWriter struct{}
+
+func (failBatchWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestBatchRetainsRequestIDsUntilResponseIsWritten(t *testing.T) {
+	t.Parallel()
+	a, b := net.Pipe()
+	slowStarted, releaseSlow, fastFinished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	handler := func(_ context.Context, method string, _ json.RawMessage) (any, *RequestError) {
+		switch method {
+		case "fast":
+			close(fastFinished)
+		case "slow":
+			close(slowStarted)
+			<-releaseSlow
+		case "duplicate":
+			return "unexpected", nil
+		}
+		return method, nil
+	}
+	opts := testOptions()
+	opts.MaxHandlerConcurrency = 2
+	c, err := NewConnectionWithOptions(handler, a, a, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	defer func() { _ = b.Close() }()
+	defer close(releaseSlow)
+	if err := b.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(b, `[{"jsonrpc":"2.0","id":1,"method":"fast"},{"jsonrpc":"2.0","id":2,"method":"slow"}]`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	<-slowStarted
+	<-fastFinished
+	// Wait for the first worker to finish its collector submission by queuing
+	// a probe; the slow worker remains occupied. Exactly two workers are used.
+	if _, err := io.WriteString(b, `{"jsonrpc":"2.0","id":3,"method":"probe"}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(b)
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(b, `{"jsonrpc":"2.0","id":1,"method":"duplicate"}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply anyMessage
+	if err := json.Unmarshal(line, &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Error == nil || reply.Error.Code != -32600 {
+		t.Fatalf("duplicate admitted before flush: %s", line)
 	}
 }

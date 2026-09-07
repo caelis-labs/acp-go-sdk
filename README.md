@@ -43,12 +43,14 @@ behind.
 Draft ACP v2 lives in `experimental/v2`. It is generated from
 `schema-v2.0.0-alpha.3` and is not a stable API. `session/prompt` acknowledges
 acceptance only; running/idle/requires_action are `session/update` state
-updates. Do not import this package from the stable root.
+updates. Its typed dispatch and lifecycle have Go loopback coverage; the
+official TypeScript/Rust interoperability gate currently covers stable ACP v1.
+Do not import this package from the stable root.
 
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.1.0
+go get github.com/caelis-labs/acp-go-sdk@v1.2.0
 ~~~
 
 ## Releases

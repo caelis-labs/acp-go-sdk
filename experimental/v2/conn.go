@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 
@@ -111,9 +112,36 @@ func (c *ClientSideConnection) Cancel(ctx context.Context, params CancelSessionN
 	return c.conn.SendNotification(ctx, AgentMethodSessionCancel, params)
 }
 
+func (c *ClientSideConnection) LoginAuth(ctx context.Context, params LoginAuthRequest) (LoginAuthResponse, error) {
+	return acp.SendRequest[LoginAuthResponse](c.conn, ctx, AgentMethodAuthLogin, params)
+}
+
+func (c *ClientSideConnection) LogoutAuth(ctx context.Context, params LogoutAuthRequest) (LogoutAuthResponse, error) {
+	return acp.SendRequest[LogoutAuthResponse](c.conn, ctx, AgentMethodAuthLogout, params)
+}
+
+func (c *ClientSideConnection) DeleteSession(ctx context.Context, params DeleteSessionRequest) (DeleteSessionResponse, error) {
+	return acp.SendRequest[DeleteSessionResponse](c.conn, ctx, AgentMethodSessionDelete, params)
+}
+
+func (c *ClientSideConnection) SetSessionConfigOption(ctx context.Context, params SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error) {
+	return acp.SendRequest[SetSessionConfigOptionResponse](c.conn, ctx, AgentMethodSessionSetConfigOption, params)
+}
+
+func (c *AgentSideConnection) CreateElicitation(ctx context.Context, params CreateElicitationRequest) (CreateElicitationResponse, error) {
+	return acp.SendRequest[CreateElicitationResponse](c.conn, ctx, ClientMethodElicitationCreate, params)
+}
+
+func (c *AgentSideConnection) CompleteElicitation(ctx context.Context, params CompleteElicitationNotification) error {
+	return c.conn.SendNotification(ctx, ClientMethodElicitationComplete, params)
+}
+
 func (a *AgentSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	switch method {
 	case AgentMethodInitialize:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[InitializeRequest](params)
 		if reqErr != nil {
 			return nil, reqErr
@@ -123,39 +151,51 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		resp, err := a.agent.Initialize(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionNew:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[NewSessionRequest](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		resp, err := a.agent.NewSession(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionPrompt:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[PromptRequest](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		resp, err := a.agent.Prompt(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionCancel:
+		if err := requireInboundKind(ctx, acp.InboundNotification, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[CancelSessionNotification](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		if err := a.agent.Cancel(ctx, req); err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return nil, nil
 	case AgentMethodSessionResume:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		resumer, ok := a.agent.(AgentSessionResumer)
 		if !ok {
 			return nil, acp.NewMethodNotFound(method)
@@ -166,10 +206,13 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		resp, err := resumer.ResumeSession(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionList:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		lister, ok := a.agent.(AgentSessionLister)
 		if !ok {
 			return nil, acp.NewMethodNotFound(method)
@@ -180,10 +223,13 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		resp, err := lister.ListSessions(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionClose:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		closer, ok := a.agent.(AgentSessionCloser)
 		if !ok {
 			return nil, acp.NewMethodNotFound(method)
@@ -194,10 +240,13 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		resp, err := closer.CloseSession(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionDelete:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		deleter, ok := a.agent.(AgentSessionDeleter)
 		if !ok {
 			return nil, acp.NewMethodNotFound(method)
@@ -208,30 +257,39 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		resp, err := deleter.DeleteSession(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodAuthLogin:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[LoginAuthRequest](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		resp, err := a.agent.LoginAuth(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodAuthLogout:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[LogoutAuthRequest](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		resp, err := a.agent.LogoutAuth(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	case AgentMethodSessionSetConfigOption:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		cfg, ok := a.agent.(AgentSessionConfig)
 		if !ok {
 			return nil, acp.NewMethodNotFound(method)
@@ -242,7 +300,7 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		}
 		resp, err := cfg.SetSessionConfigOption(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
 	default:
@@ -253,24 +311,65 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 func (c *ClientSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	switch method {
 	case ClientMethodSessionUpdate:
+		if err := requireInboundKind(ctx, acp.InboundNotification, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[UpdateSessionNotification](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		if err := c.client.SessionUpdate(ctx, req); err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return nil, nil
 	case ClientMethodSessionRequestPermission:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
 		req, reqErr := decodeParams[RequestPermissionRequest](params)
 		if reqErr != nil {
 			return nil, reqErr
 		}
 		resp, err := c.client.RequestPermission(ctx, req)
 		if err != nil {
-			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+			return nil, toRequestError(err)
 		}
 		return resp, nil
+
+	case ClientMethodElicitationCreate:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
+		client, ok := c.client.(ClientElicitation)
+		if !ok {
+			return nil, acp.NewMethodNotFound(method)
+		}
+		req, reqErr := decodeParams[CreateElicitationRequest](params)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		resp, err := client.CreateElicitation(ctx, req)
+		if err != nil {
+			return nil, toRequestError(err)
+		}
+		return resp, nil
+	case ClientMethodElicitationComplete:
+		if err := requireInboundKind(ctx, acp.InboundNotification, method); err != nil {
+			return nil, err
+		}
+		client, ok := c.client.(ClientElicitationCompletion)
+		if !ok {
+			return nil, acp.NewMethodNotFound(method)
+		}
+		req, reqErr := decodeParams[CompleteElicitationNotification](params)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		if err := client.CompleteElicitation(ctx, req); err != nil {
+			return nil, toRequestError(err)
+		}
+		return nil, nil
+
 	default:
 		return nil, acp.NewMethodNotFound(method)
 	}
@@ -291,4 +390,27 @@ func decodeParams[T any](params json.RawMessage) (T, *acp.RequestError) {
 		}
 	}
 	return value, nil
+}
+
+// Keep protocol errors intact across the experimental typed dispatch boundary.
+func toRequestError(err error) *acp.RequestError {
+	var requestError *acp.RequestError
+	if errors.As(err, &requestError) {
+		return requestError
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return acp.NewRequestCancelled(map[string]any{"error": err.Error()})
+	}
+	return acp.NewInternalError(map[string]any{"error": err.Error()})
+}
+
+func requireInboundKind(ctx context.Context, want acp.InboundKind, method string) *acp.RequestError {
+	info, ok := acp.InboundInfoFromContext(ctx)
+	if !ok {
+		return acp.NewInternalError(map[string]any{"error": "ACP inbound message metadata is unavailable"})
+	}
+	if info.Kind != want {
+		return acp.NewMethodNotFound(method)
+	}
+	return nil
 }

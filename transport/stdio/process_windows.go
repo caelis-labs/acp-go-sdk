@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -139,19 +140,21 @@ func (j *windowsJob) terminate() error {
 		j.mu.Lock()
 		defer j.mu.Unlock()
 		if j.handle != 0 {
+			// Retain existing members before termination. A terminating process
+			// can disappear from the job's PID list before its handle is signaled.
+			before, beforeErr := openJobProcessHandles(j.handle)
 			if err := windows.TerminateJobObject(j.handle, 1); err != nil {
-				j.terminateErr = err
+				j.terminateErr = errors.Join(beforeErr, err, closeWindowsHandles(before))
 				return
 			}
-			// Terminate the job before taking the member snapshot. Once all job
-			// processes have received an unhandleable termination request, none
-			// can create a member between the snapshot and the wait. Members that
-			// are still terminating remain associated with the job and can be
-			// waited through stable process handles.
-			processHandles, processHandleErr := openJobProcessHandles(j.handle)
-			waitErr := waitForWindowsProcesses(processHandles)
-			closeErr := closeWindowsHandles(processHandles)
-			j.terminateErr = errors.Join(processHandleErr, waitErr, closeErr)
+			// Also retain members created while taking the first snapshot. Never
+			// replace the pre-termination handles with this second, narrower view.
+			after, afterErr := openJobProcessHandles(j.handle)
+			handles := append(before, after...)
+			waitErr := waitForWindowsProcesses(handles)
+			emptyErr := waitForWindowsJobEmpty(j.handle)
+			closeErr := closeWindowsHandles(handles)
+			j.terminateErr = errors.Join(beforeErr, afterErr, waitErr, emptyErr, closeErr)
 		}
 	})
 	return j.terminateErr
@@ -267,6 +270,28 @@ func waitForWindowsProcesses(handles []windows.Handle) error {
 		}
 	}
 	return waitErr
+}
+
+// The accounting count covers descendants created during enumeration as well.
+// Completion-port exit notifications are not guaranteed to be delivered, so
+// query the authoritative count instead of relying on receipt of a message.
+func waitForWindowsJobEmpty(job windows.Handle) error {
+	type basicAccounting struct {
+		totalUserTime, totalKernelTime                                                 int64
+		thisPeriodTotalUserTime, thisPeriodTotalKernelTime                             int64
+		totalPageFaultCount, totalProcesses, activeProcesses, totalTerminatedProcesses uint32
+	}
+	for {
+		var info basicAccounting
+		if err := windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation,
+			uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil); err != nil {
+			return fmt.Errorf("stdio: query terminating job accounting: %w", err)
+		}
+		if info.activeProcesses == 0 {
+			return nil
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func closeWindowsHandles(handles []windows.Handle) error {
