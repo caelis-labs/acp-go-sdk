@@ -57,6 +57,8 @@ func FuzzConnectionFraming(f *testing.F) {
 		"\n",
 		`{"jsonrpc":"2.0","method":"note"}` + "\n",
 		`{"jsonrpc":"2.0","id":"x","method":"call"}` + "\n",
+		`[{"jsonrpc":"2.0","id":1,"method":"call"},{"jsonrpc":"2.0","method":"note"}]` + "\n",
+		"[]\n",
 		"{\n",
 	} {
 		f.Add([]byte(seed))
