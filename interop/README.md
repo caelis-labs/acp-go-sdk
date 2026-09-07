@@ -17,9 +17,10 @@ Each direction covers the deterministic `core`, `session-cancel`, and
 `request-cancel` scenarios. `session-cancel` proves prompt-turn cancellation.
 `request-cancel` separately proves `$/cancel_request` and JSON-RPC `-32800`.
 
-External SDK identities are recorded in `versions.json`. Published dependency
-artifacts are locked by `package-lock.json` and `Cargo.lock`; the Rust compiler
-is selected by the peer-local `rust-toolchain.toml`.
+External SDK identities are recorded in `versions.json` and mirrored by
+`upstream/lock.json`. Published dependency artifacts are locked by
+`package-lock.json` and `Cargo.lock`; the Rust compiler is selected by the
+peer-local `rust-toolchain.toml`.
 
 Run the complete matrix with:
 

@@ -25,6 +25,7 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: false
       - run: make verify-schema
+      - run: make verify-upstream
       - run: make check-generated
       - run: make test
       - run: make vet
