@@ -2,10 +2,12 @@ GOCACHE ?= $(CURDIR)/.gocache
 GOMODCACHE ?= $(CURDIR)/.gomodcache
 INTEROP_EVIDENCE_DIR ?= $(CURDIR)/.artifacts/interop
 GENERATED := agent_gen.go client_gen.go constants_gen.go helpers_gen.go types_gen.go
+V2_GENERATED := constants_gen.go helpers_gen.go types_gen.go
 
 .PHONY: verify-schema
 verify-schema:
 	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/schemaverify -schema ./schema
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/schemaverify -schema ./schema/v2
 
 .PHONY: verify-upstream
 verify-upstream:
@@ -18,6 +20,8 @@ upstream-drift:
 .PHONY: generate
 generate: verify-schema
 	cd cmd/generate && GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run .
+	cd cmd/generate && GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run . -schema ../../schema/v2 -out ../../experimental/v2 -package v2 -dispatch=false
+	gofmt -w experimental/v2/constants_gen.go experimental/v2/helpers_gen.go experimental/v2/types_gen.go
 
 .PHONY: check-generated
 check-generated: verify-schema
@@ -27,6 +31,12 @@ check-generated: verify-schema
 	cd ../..; \
 	status=0; \
 	for file in $(GENERATED); do diff -u "$$file" "$$tmp/$$file" || status=1; done; \
+	tmp2=$$(mktemp -d); \
+	cd cmd/generate && GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run . -schema ../../schema/v2 -out "$$tmp2" -package v2 -dispatch=false; \
+	cd ../..; \
+	gofmt -w $$(for file in $(V2_GENERATED); do echo "$$tmp2/$$file"; done); \
+	for file in $(V2_GENERATED); do diff -u "experimental/v2/$$file" "$$tmp2/$$file" || status=1; done; \
+	rm -rf "$$tmp2"; \
 	exit $$status
 
 .PHONY: test

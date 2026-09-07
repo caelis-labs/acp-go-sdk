@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Experimental ACP v2
+
+- Added `experimental/v2`, generated from pinned `schema-v2.0.0-alpha.3`.
+  The package is draft-only and is not part of the stable root API. It
+  implements initialize version pinning, session new/resume/list/close,
+  prompt-acceptance ACK, and `state_update` session updates.
+
 ### JSON-RPC transport
 
 - Ingress now classifies each NDJSON value as a single JSON-RPC object, a
