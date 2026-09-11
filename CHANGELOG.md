@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.3.0] - 2026-09-11
+
+### JSON-RPC transport
+
+- Added an optional `AcceptNotification` method predicate so unsupported
+  notification traffic can be discarded before queue admission. The default
+  accepts all notifications. Request dispatch, cancellation, and ordering of
+  accepted notifications remain unchanged.
+- Added `MaxNotificationBytes` (32 MiB by default) to bound queued and executing
+  notification payloads alongside the existing notification count limit.
+  Exhaustion closes the connection with `ErrNotificationQueueFull`.
+
+### Maintenance
+
+- Added a security policy covering private vulnerability reporting, version
+  support, and the SDK's transport boundary.
+
 ## [v1.2.0] - 2026-09-07
 
 ### Fixes
