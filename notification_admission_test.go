@@ -13,7 +13,7 @@ func TestNotificationAdmissionDoesNotConsumeCapacityOrWatermark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	for range 10000 {
 		if !c.enqueueNotification(anyMessage{Method: "_unsupported", Params: json.RawMessage(`{"large":"ignored"}`)}) {
 			t.Fatal("unsupported notification used capacity")
@@ -40,7 +40,7 @@ func TestNotificationByteBudgetIncludesExecutingNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	note := anyMessage{Method: "method", Params: json.RawMessage(`{}`)}
 	if !c.enqueueNotification(note) {
 		t.Fatal("first notification rejected")
@@ -60,7 +60,7 @@ func TestNotificationFilterDoesNotInterceptRequestsOrCancellation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	id := json.RawMessage(`1`)
 	c.dispatchMessage(anyMessage{JSONRPC: "2.0", ID: &id, Method: "request"}, nil)
 	c.dispatchMessage(anyMessage{JSONRPC: "2.0", Method: jsonRPCMethodCancelRequest, Params: json.RawMessage(`{"requestId":1}`)}, nil)
