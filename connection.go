@@ -20,6 +20,7 @@ const (
 	defaultMaxHandlerConcurrency  = 32
 	defaultMaxQueuedRequests      = 128
 	defaultMaxQueuedNotifications = 1024
+	defaultMaxNotificationBytes   = 32 << 20
 	defaultMaxQueuedWrites        = 1024
 )
 
@@ -43,8 +44,15 @@ type ConnectionOptions struct {
 	MaxHandlerConcurrency  int
 	MaxQueuedRequests      int
 	MaxQueuedNotifications int
-	MaxQueuedWrites        int
-	Logger                 *slog.Logger
+	// MaxNotificationBytes bounds queued and currently executing notification payloads.
+	MaxNotificationBytes int
+	MaxQueuedWrites      int
+	// AcceptNotification is an optional method-only admission predicate. False
+	// discards an unsupported notification before it occupies queue capacity or
+	// an ordering watermark. It runs on the reader and must not block, panic, or
+	// call this connection. Requests, responses and $/cancel_request bypass it.
+	AcceptNotification func(method string) bool
+	Logger             *slog.Logger
 }
 
 // DefaultConnectionOptions returns the production defaults used by
@@ -56,6 +64,7 @@ func DefaultConnectionOptions() ConnectionOptions {
 		MaxHandlerConcurrency:  defaultMaxHandlerConcurrency,
 		MaxQueuedRequests:      defaultMaxQueuedRequests,
 		MaxQueuedNotifications: defaultMaxQueuedNotifications,
+		MaxNotificationBytes:   defaultMaxNotificationBytes,
 		MaxQueuedWrites:        defaultMaxQueuedWrites,
 	}
 }
@@ -77,6 +86,9 @@ func normalizeConnectionOptions(opts ConnectionOptions) (ConnectionOptions, erro
 	if opts.MaxQueuedNotifications == 0 {
 		opts.MaxQueuedNotifications = defaults.MaxQueuedNotifications
 	}
+	if opts.MaxNotificationBytes == 0 {
+		opts.MaxNotificationBytes = defaults.MaxNotificationBytes
+	}
 	if opts.MaxQueuedWrites == 0 {
 		opts.MaxQueuedWrites = defaults.MaxQueuedWrites
 	}
@@ -85,6 +97,7 @@ func normalizeConnectionOptions(opts ConnectionOptions) (ConnectionOptions, erro
 		opts.MaxHandlerConcurrency < 1 ||
 		opts.MaxQueuedRequests < 1 ||
 		opts.MaxQueuedNotifications < 1 ||
+		opts.MaxNotificationBytes < 1 ||
 		opts.MaxQueuedWrites < 1 {
 		return ConnectionOptions{}, errors.New("acp: connection limits must be positive")
 	}
@@ -285,6 +298,7 @@ type Connection struct {
 	inflight map[string]context.CancelCauseFunc
 
 	notifyMu                    sync.Mutex
+	notificationBytes           int
 	lastEnqueuedNotificationSeq uint64
 	completedNotificationSeq    uint64
 	completedNotifications      map[uint64]struct{}
@@ -581,12 +595,21 @@ func (c *Connection) enqueueRequest(msg anyMessage, write responseWriter) {
 }
 
 func (c *Connection) enqueueNotification(msg anyMessage) bool {
+	if c.opts.AcceptNotification != nil && !c.opts.AcceptNotification(msg.Method) {
+		return true
+	}
 	delivery := c.responseDeliveryBarrier()
 	c.notifyMu.Lock()
+	bytes := len(msg.Method) + len(msg.Params)
+	if bytes > c.opts.MaxNotificationBytes-c.notificationBytes {
+		c.notifyMu.Unlock()
+		return false
+	}
 	seq := c.lastEnqueuedNotificationSeq + 1
 	queued := queuedNotification{seq: seq, delivery: delivery, msg: msg}
 	select {
 	case c.notificationQueue <- queued:
+		c.notificationBytes += bytes
 		c.lastEnqueuedNotificationSeq = seq
 		c.notifyMu.Unlock()
 		return true
@@ -626,6 +649,11 @@ func (c *Connection) processNotifications() {
 }
 
 func (c *Connection) processNotification(queued queuedNotification) {
+	defer func() {
+		c.notifyMu.Lock()
+		c.notificationBytes -= len(queued.msg.Method) + len(queued.msg.Params)
+		c.notifyMu.Unlock()
+	}()
 	if err := c.waitResponseDelivery(c.ctx, queued.delivery); err != nil {
 		c.markNotificationComplete(queued.seq)
 		return

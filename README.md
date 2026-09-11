@@ -50,7 +50,7 @@ Do not import this package from the stable root.
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.2.0
+go get github.com/caelis-labs/acp-go-sdk@v1.3.0
 ~~~
 
 ## Releases
@@ -125,6 +125,18 @@ Every connection has finite limits for:
 - queued writes and cancellation notifications.
 
 Use ConnectionOptions to tune them. Zero values select production defaults.
+Notification buffering is bounded by both count and total method/parameter
+bytes, including the notification currently executing. `MaxNotificationBytes`
+defaults to 32 MiB; exhausting either notification limit fails the connection
+with `ErrNotificationQueueFull` instead of dropping accepted notifications.
+
+`AcceptNotification` optionally filters unsupported notification methods before
+queue admission. A nil predicate accepts every notification. Applications must
+continue accepting the standard and negotiated extension notifications their
+role implements. The predicate runs on the reader, must return immediately,
+and must not panic or call the connection. Requests, responses, and
+`$/cancel_request` bypass it. Filtering does not change the relative order or
+response barriers of accepted notifications, and emits no JSON-RPC response.
 Connections own their reader/writer streams, Close is idempotent, Done signals
 shutdown, Err exposes its immutable cause, and Wait(ctx) waits for all
 connection-owned goroutines.
