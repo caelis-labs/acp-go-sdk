@@ -26,6 +26,15 @@ function optional(path) {
     throw error;
   }
 }
+function releaseByTag(tag) {
+  // The REST tag endpoint does not resolve draft releases. gh also performs
+  // the GraphQL pending-tag lookup needed to resume a partially created draft.
+  try { return JSON.parse(gh('release', 'view', tag, '--repo', repo, '--json', 'isDraft,isPrerelease,url')); }
+  catch (error) {
+    if (String(error.stderr).includes('release not found')) return null;
+    throw error;
+  }
+}
 function output(key, value) { appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`); }
 function positiveID(value) {
   if (!/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value))) throw new Error('invalid PR or run ID');
@@ -125,15 +134,15 @@ function publish() {
     const object = api('git/tags', {tag, message: `${tag}\n\nValidated by https://github.com/${repo}/actions/runs/${plan.run}`, object: plan.commit, type: 'commit'});
     api('git/refs', {ref: `refs/tags/${tag}`, sha: object.sha});
   }
-  let release = optional(`releases/tags/${tag}`);
+  let release = releaseByTag(tag);
   if (!release) {
     gh('release', 'create', tag, '--repo', repo, '--verify-tag', '--draft', '--title', `ACP Go SDK ${tag}`, '--notes-file', `${directory}/notes.md`);
-    release = api(`releases/tags/${tag}`);
+    release = {isDraft: true};
   }
-  if (release.draft) {
+  if (release.isDraft) {
     gh('release', 'upload', tag, '--repo', repo, '--clobber', `${directory}/release-validation.json`, `${directory}/api-diff.txt`, `${directory}/interop-evidence.json`);
     gh('release', 'edit', tag, '--repo', repo, '--draft=false', '--latest', '--notes-file', `${directory}/notes.md`);
-  } else if (release.prerelease) { throw new Error('existing release is a prerelease'); }
+  } else if (release.isPrerelease) { throw new Error('existing release is a prerelease'); }
   gh('label', 'create', 'autorelease: tagged', '--repo', repo, '--color', 'ededed', '--description', 'Release has been published', '--force');
   gh('pr', 'edit', String(plan.pr), '--repo', repo, '--add-label', 'autorelease: tagged', '--remove-label', 'autorelease: pending');
   console.log(`Published https://github.com/${repo}/releases/tag/${tag}`);
