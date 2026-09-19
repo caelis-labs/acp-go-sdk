@@ -5,7 +5,7 @@ import test from 'node:test';
 
 const results = ['TEST_RESULT', 'RACE_RESULT', 'WINDOWS_RESULT', 'INTEROP_RESULT'];
 function check(full, overrides = {}) {
-  const env = { ...process.env, CHANGES_RESULT: 'success', FULL: full,
+  const env = { ...process.env, CHANGES_RESULT: 'success', FULL: full, RELEASE: 'false', APPROVAL_RESULT: 'skipped', ACCEPTANCE_RESULT: 'skipped',
     ...Object.fromEntries(results.map(key => [key, full === 'true' ? 'success' : 'skipped'])), ...overrides };
   return spawnSync('bash', [fileURLToPath(new URL('./ci-result.sh', import.meta.url))], {env, encoding: 'utf8'});
 }
@@ -32,4 +32,17 @@ test('every full-CI dependency must succeed and every unselected dependency must
       }
     }
   }
+});
+
+
+test('a release requires full checks, explicit approval and acceptance', () => {
+  const valid = {RELEASE: 'true', APPROVAL_RESULT: 'success', ACCEPTANCE_RESULT: 'success'};
+  assert.equal(check('true', valid).status, 0);
+  assert.notEqual(check('false', valid).status, 0);
+  for (const key of ['APPROVAL_RESULT', 'ACCEPTANCE_RESULT']) {
+    for (const result of ['failure', 'cancelled', 'skipped', '']) {
+      assert.notEqual(check('true', {...valid, [key]: result}).status, 0);
+    }
+  }
+  for (const release of ['', 'invalid']) assert.notEqual(check('true', {RELEASE: release}).status, 0);
 });

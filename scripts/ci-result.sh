@@ -18,4 +18,16 @@ expect test "${TEST_RESULT}" "${code_result}"
 expect race-and-static "${RACE_RESULT}" "${code_result}"
 expect windows-stdio "${WINDOWS_RESULT}" "${code_result}"
 expect official-sdk-interop "${INTEROP_RESULT}" "${code_result}"
+case "${RELEASE}" in
+  true)
+    expect full "${FULL}" true
+    expect release-approval "${APPROVAL_RESULT}" success
+    expect release-acceptance "${ACCEPTANCE_RESULT}" success
+    ;;
+  false)
+    expect release-approval "${APPROVAL_RESULT}" skipped
+    expect release-acceptance "${ACCEPTANCE_RESULT}" skipped
+    ;;
+  *) echo 'missing or invalid release classification' >&2; exit 1 ;;
+esac
 echo 'All checks selected for this change passed.'

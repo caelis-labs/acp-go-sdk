@@ -45,14 +45,14 @@ test('only maintained prose and release metadata can select lightweight CI', () 
   assert.equal(classifyPaths(['README.md', 'source.go']).full, true);
 });
 
-test('a real release diff validates metadata without selecting full checks', t => {
+test('a version bump always selects approved full release validation', t => {
   const f = fixture(t);
   f.release(); f.commit();
-  assert.deepEqual(inspectChanges(f.base, f.cwd), {full: false});
+  assert.deepEqual(inspectChanges(f.base, f.cwd), {full: true, release: true});
   assert.equal(validateReleaseMetadata(f.cwd), '1.4.0');
   for (const heading of ['## [1.4.0](https://example.invalid/compare) (2026-09-19)', '## 1.4.0 (2026-09-19)']) {
     f.write('CHANGELOG.md', `# Changelog\n\n${heading}\nDetails\n`); f.commit();
-    assert.equal(inspectChanges(f.base, f.cwd).full, false);
+    assert.equal(inspectChanges(f.base, f.cwd).full, true);
   }
   f.write('source.go', 'package updated\n'); f.commit();
   assert.equal(inspectChanges(f.base, f.cwd).full, true, 'release metadata cannot hide a code change');
@@ -88,7 +88,7 @@ for (const [name, mutate, error] of [
 test('bootstrap records the last published version and always selects full CI', t => {
   const f = fixture(t, true);
   f.release('1.3.0'); f.commit();
-  assert.equal(inspectChanges(f.base, f.cwd).full, true);
+  assert.deepEqual(inspectChanges(f.base, f.cwd), {full: true, release: false});
   f.release('1.4.0'); f.commit();
   assert.throws(() => inspectChanges(f.base, f.cwd), /bootstrap manifest/);
 });
@@ -134,4 +134,41 @@ test('unavailable or unrelated base cannot emit a successful scope', t => {
     assert.notEqual(result.status, 0, result.stdout);
     assert.equal(existsSync(output), false);
   }
+});
+
+test('CI context binds each checkout to the PR event merge parents', t => {
+  const f = fixture(t);
+  f.git('checkout', '-b', 'pr'); f.write('docs/test.md', 'prose'); const head = f.commit();
+  f.git('checkout', 'main'); f.git('merge', '--no-ff', 'pr', '-m', 'merge candidate');
+  const commit = f.git('rev-parse', 'HEAD');
+  const eventPath = join(f.cwd, 'event.json'), output = join(f.cwd, 'output');
+  f.write('event.json', JSON.stringify({pull_request: {number: 8, head: {sha: head}, base: {sha: f.base}}}));
+  const run = sha => spawnSync(process.execPath, [fileURLToPath(new URL('./ci-context.mjs', import.meta.url))], {
+    cwd: f.cwd, encoding: 'utf8', env: {...process.env, GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_REPOSITORY: 'owner/sdk', GITHUB_SHA: sha, GITHUB_OUTPUT: output},
+  });
+  assert.equal(run(commit).status, 0);
+  rmSync(output);
+  assert.notEqual(run(head).status, 0, 'never test an event different from the checkout');
+  assert.equal(existsSync(output), false);
+});
+
+test('manual recovery selects the merged release commit and still requires approval', t => {
+  const f = fixture(t);
+  f.release(); const merged = f.commit();
+  f.git('update-ref', 'refs/remotes/origin/main', merged);
+  const eventPath = join(f.cwd, 'event.json'), output = join(f.cwd, 'output');
+  f.write('event.json', JSON.stringify({inputs: {release_pr: '8'}}));
+  f.write('pr.json', JSON.stringify({number: 8, merged: true, base: {ref: 'main'},
+    head: {sha: merged, repo: {full_name: 'owner/sdk'}}, merge_commit_sha: merged}));
+  f.write('bin/gh', '#!/bin/sh\ncat "$PR_FIXTURE"\n'); chmodSync(join(f.cwd, 'bin/gh'), 0o755);
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('./ci-context.mjs', import.meta.url))], {
+    cwd: f.cwd, encoding: 'utf8', env: {...process.env, PATH: `${join(f.cwd, 'bin')}:${process.env.PATH}`,
+      PR_FIXTURE: join(f.cwd, 'pr.json'), GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: 'workflow_dispatch',
+      GITHUB_REPOSITORY: 'owner/sdk', GITHUB_REF: 'refs/heads/main', GITHUB_OUTPUT: output},
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"release":true/);
+  assert.match(result.stdout, /"full":true/);
+  assert.ok(result.stdout.includes(`"commit":"${merged}"`));
 });

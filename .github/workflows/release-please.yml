@@ -26,10 +26,11 @@ jobs:
             echo "::error::Provide RELEASE_PLEASE_TOKEN as a repository or selected-repository organization secret; see RELEASING.md."
             exit 1
           fi
-      - name: Maintain release PR and publish merged releases
+      - name: Maintain release PR
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          skip-github-release: true
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

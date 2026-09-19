@@ -33,18 +33,18 @@ function changelogVersion(content) {
   return match?.[1] ?? match?.[2];
 }
 
-export function validateReleaseMetadata(cwd = process.cwd()) {
+export function validateReleaseMetadata(cwd = process.cwd(), ref = 'HEAD') {
   const git = gitAt(cwd);
   for (const path of [...releaseFiles, 'README.md']) {
-    if (!git('ls-tree', 'HEAD', '--', path).startsWith('100644 blob ')) {
+    if (!git('ls-tree', ref, '--', path).startsWith('100644 blob ')) {
       throw new Error(`${path} must be a regular non-executable file`);
     }
   }
-  const version = manifestVersion(git('show', 'HEAD:.release-please-manifest.json'));
-  if (changelogVersion(git('show', 'HEAD:CHANGELOG.md')) !== version) {
+  const version = manifestVersion(git('show', `${ref}:.release-please-manifest.json`));
+  if (changelogVersion(git('show', `${ref}:CHANGELOG.md`)) !== version) {
     throw new Error(`first changelog release heading must match ${version}`);
   }
-  const readme = git('show', 'HEAD:README.md');
+  const readme = git('show', `${ref}:README.md`);
   const installs = [...readme.matchAll(/^go get github\.com\/caelis-labs\/acp-go-sdk@v(\S+)$/gm)];
   if (installs.length !== 1 || installs[0][1] !== version) {
     throw new Error(`README installation version must match ${version}`);
@@ -59,6 +59,7 @@ export function inspectChanges(base, cwd = process.cwd()) {
   const paths = git('diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', base, 'HEAD', '--')
     .split('\0').filter(Boolean);
   const scope = classifyPaths(paths);
+  scope.release = false;
   // Consider both modes, including removed executables/symlinks at prose paths.
   for (const ref of [base, 'HEAD']) {
     const entries = new Map(git('ls-tree', '-r', '-z', ref).split('\0').filter(Boolean)
@@ -83,6 +84,8 @@ export function inspectChanges(base, cwd = process.cwd()) {
       if (changed < 0 || after[changed] < before[changed]) {
         throw new Error(`release version must increase from ${previous}, got ${version}`);
       }
+      scope.release = true;
+      scope.full = true;
     }
   }
   return scope;
@@ -92,7 +95,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const scope = inspectChanges(process.env.PR_BASE_SHA);
     console.log(`Full CI required: ${scope.full}`);
-    appendFileSync(process.env.GITHUB_OUTPUT, `full=${scope.full}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `full=${scope.full}\nrelease=${scope.release}\n`);
   } catch (error) {
     console.error(`CI change inspection failed: ${error.message}`);
     process.exitCode = 1;

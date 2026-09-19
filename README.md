@@ -65,16 +65,15 @@ go get github.com/caelis-labs/acp-go-sdk@v1.3.0
 
 ## Releases
 
-Release Please maintains a Release PR with the changelog, version manifest,
-and installation example. Merging that PR publishes an immutable Go module tag
-and GitHub Release from protected `main`. Code changes pass the full PR CI,
-including official SDK interoperability; documentation and release metadata
-receive lightweight validation. Publication verifies a fresh public-proxy
-consumer without repeating the full test matrix.
+Release Please maintains the version, changelog, and installation example in a
+Release PR. A maintainer approves its complete CI before merging. Publication
+verifies that the merged release contains exactly the tested Git tree before
+creating an immutable tag and GitHub Release. Ordinary PRs do not need to track
+every main update; release version bumps always require the full matrix,
+including race checks, Windows stdio, and official SDK interoperability.
 
-See [RELEASING.md](RELEASING.md) for the release procedure and
-[v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) for the pending protocol
-upgrade.
+See [RELEASING.md](RELEASING.md) for approval, validation, publication and recovery,
+and [v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) for the protocol upgrade.
 
 ## Agent side
 

@@ -1,7 +1,7 @@
 # Upgrading to v1.4.0
 
-Migration notes prepared for the next release. The published baseline remains
-`v1.3.0` until the release-please Release PR is merged and its tag is published.
+These notes describe the protocol changes in v1.4.0. The README installation
+example tracks the version recorded by the latest Release PR.
 
 ## Protocol alignment
 

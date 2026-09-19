@@ -1,132 +1,156 @@
 # Releasing ACP Go SDK
 
-ACP Go SDK releases are immutable Go module versions. Once a public tag reaches
-GitHub, Go proxies and downstream caches may retain it indefinitely. Never move,
-delete, or reuse a published tag.
+ACP Go SDK versions are immutable. Never move, delete, or reuse a public tag:
+GitHub, Go proxies, checksum databases, and downstream caches may retain it.
 
-## Normal release flow
+## Development and release validation
 
-1. Open a PR against `main`. Use a Conventional Commit PR title and squash merge:
-   `feat: ...` selects a minor version, `fix: ...` selects a patch, and
-   `chore: ...` / `docs: ...` do not normally start a release. A stable API breaking
-   change requires an explicit major-version and Go module-path migration.
-2. The required `quality` check validates the actual PR diff. Code, generated
-   protocol, schema, dependency, script, workflow, and unknown-path changes run
-   the full Go 1.23/1.25, race/static, Windows stdio, and official TypeScript/Rust
-   interoperability checks. Interop evidence remains a CI artifact. Prose and
-   release metadata run the classifier's regression tests, metadata consistency,
-   and whitespace checks. Classification or any selected check failing blocks
-   merging; a skipped code check cannot satisfy a code PR.
-3. After merge, `release-please` maintains a Release PR on `main`. It updates
-   `CHANGELOG.md`, `.release-please-manifest.json`, and the marked installation
-   example in `README.md`. Review the version, notes, compatibility changes, and
-   relevant code PR's interoperability evidence. Add migration detail to the
-   generated changelog before merging when needed.
-4. Merge the Release PR after its `quality` check passes. This is the publication
-   decision. Release Please creates the version tag and GitHub Release at the
-   merged release commit. No auto-merge or separate environment approval is used.
-5. `Verify release` runs once on `release.published`: it checks `main` ancestry,
-   tag/manifest/changelog/README agreement, and a fresh public Go proxy consumer
-   importing stable, experimental v2, and stdio packages. It does not rerun the
-   full test matrix. Check pkg.go.dev indexing separately; it may lag the proxy.
+Ordinary PRs do not have to follow every movement of `main`. Code, protocol,
+schema, dependency, workflow, and unknown-path changes still run the Go version
+matrix, race/static checks, native Windows stdio, and official TypeScript/Rust
+interoperability. Documentation-only changes use lightweight checks. Full CI
+runs on PRs, not again on every main push.
 
-Ordinary pushes to `main` run only Release Please, not another full CI run. Its
-updates are serialized and are not forced when the release notes are unchanged
-(`always-update` is left at its default). Obsolete PR CI runs are cancelled.
-Schema checksum verification, upstream lock validation, generation, formatting,
-and vet run once in the full pipeline, rather than once per Go matrix entry.
+A release is a separate acceptance decision:
 
-This replaces the former manual exact-main-SHA tagging workflow. The release
-trust boundary is now protected PR merges into `main`: a release-metadata-only
-PR reuses the already reviewed code and conformance evidence. Publication checks
-observe an already public version; they are not a substitute for pre-merge CI.
+1. Use Conventional Commit PR titles and squash merges. `feat:` selects a minor
+   release, `fix:` selects a patch; `docs:` and `chore:` normally do not start a
+   release. A stable API breaking change needs an explicit major-version and Go
+   module-path migration.
+2. `release-please` automatically maintains the Release PR's manifest, changelog,
+   and marked README installation example. Its `skip-github-release: true`
+   setting prevents it from creating a tag before release acceptance.
+3. Review the Release PR's notes, compatibility and scope. CI detects an actual
+   manifest version increase, independently of author, branch, title or labels.
+   The increase always requires full release validation, including when every
+   changed file would otherwise count as release metadata.
+4. Approve the run's single `release-validation` Environment gate as a maintainer.
+   Before approval, only lightweight classification and its regression tests run.
+   Approval unlocks the full matrix plus bounded fuzzing and an API comparison
+   against the previous release. Each new candidate run needs approval; obsolete
+   runs are cancelled. The final required `quality` check rejects failures,
+   cancellations, missing classification, and unexpectedly skipped checks.
+5. After the complete CI succeeds, the maintainer merges the Release PR. There is
+   no auto-merge. The `Publish release` workflow verifies the evidence below
+   before creating an annotated tag at the merged release commit, uploading
+   evidence assets, and publishing the GitHub Release.
+6. `Verify release` runs once after publication. It checks main ancestry,
+   tag/manifest/changelog/README agreement and a fresh public Go Proxy consumer.
+   It does not repeat the full matrix. pkg.go.dev indexing can lag the proxy.
 
-## Bootstrap and migration notes
+The Go 1.23/1.25 matrix, root and generator tests/race, vet/static analysis,
+formatting, schema checksums, upstream lock consistency, deterministic generation,
+examples, fresh local consumer, native Windows process lifecycle, and all official
+SDK interop cases are required for a release. The release-only acceptance job
+also replays fuzz seeds, fuzzes each target for 15 seconds with bounded parallelism,
+and compares the module API using a pinned `apidiff` tool on Go 1.26.8. Unexpected
+stable API incompatibilities fail; schema provenance constant value updates and
+isolated experimental API changes are reported for review.
 
-The initial manifest records the already published `1.3.0`, and `bootstrap-sha`
-is its release commit, `36a6825c7e4611d87bc26712f1efaf2dcb24eb34`. Do not pre-bump
-the manifest or add an unreleased numbered changelog heading in a feature PR.
-Release Please owns those changes. The next `feat:` merge produces `v1.4.0`.
-[The v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) retain the stable tool
-name and experimental v2 message-ID compatibility details.
+## Binding acceptance to publication
 
-An exceptional version override can use a reviewed `Release-As: 1.4.0` footer
-in a squash commit. Do not leave a persistent `release-as` config override.
-Experimental v2 changes remain isolated from the stable root package and must
-be explained in release notes even though they do not change the stable ACP
-wire protocol version.
+CI checks out one immutable candidate commit in every job. Successful release
+validation produces `release-validation.json` containing the PR number, head/base
+SHAs, tested commit/tree, version, run ID and attempt. The interop report records
+the same clean checkout. Acceptance artifacts are named by run attempt so a
+re-run cannot silently reuse an older attempt's evidence.
 
-## Repository controls
+Before any tag becomes visible, `Publish release` requires:
 
-- Protect `main` with the GitHub Actions `quality` check (integration ID 15368),
-  a PR requirement, resolved review conversations, and no force pushes/deletion
-  or bypass actors. Keep the aggregate check's name stable.
-- Do not require an up-to-date branch for every PR. A movement of `main` alone
-  should not force another full matrix; refresh and rerun when concurrent
-  changes could affect the PR. Review interacting changes before merging.
-- Keep `refs/tags/v*` protected against deletion and non-fast-forward updates.
-  Allow creation so the release bot can publish a new version.
-- During migration, wait until the new `quality` check succeeds, then replace
-  the five individual required job names with `quality` in the ruleset. Keep
-  the old requirements until the aggregate is available; otherwise PRs may
-  lose their gate or wait for a check that does not exist.
-- Use squash merges with the PR title as the commit title. For merge/rebase
-  workflows, maintain Conventional Commits in the actual commits as well.
+- A merged, same-repository Release PR targeting protected `main`, with an actual
+  version increase and consistent committed manifest/changelog/README.
+- A successful run of this repository's `ci.yml` with every release job successful,
+  including approval, acceptance, both Go versions, race/static, Windows and interop.
+- GitHub's environment approval history showing a human repository maintainer
+  approved `release-validation`; skipped approval is not accepted.
+- Evidence matching the PR, version, run, attempt, and tested Git commit. Normal
+  PR validation must have the claimed main/head merge parents. Recovery validation
+  must test the exact merged release commit.
+- Exact equality between the tested tree and the release commit's tree. Squash
+  may change the commit SHA but must not change its contents.
+- Complete, clean cross-SDK evidence from that tested commit and an acceptable
+  API diff. Both reports and the validation record become permanent release assets.
 
-CI uses `pull_request` with `contents: read`, no release secret, and checkouts
-without persisted credentials. There is no bot/label/title-based test bypass or
-`pull_request_target` execution of PR code. New or unknown files select full CI.
-The classifier uses the PR base-to-merge diff, including deletions and renames;
-metadata must be regular files and the version must increase in a Release PR.
+If concurrent changes reach main before the release merge and change the tree,
+publication stops before creating a tag. The selected release commit is immutable;
+later main commits are never substituted for it. Labels assist Release Please's
+bookkeeping but do not grant publication authority.
 
-## Release bot permissions
+## Repository and approval controls
 
-Provide `RELEASE_PLEASE_TOKEN` as a repository secret or an organization secret
-whose selected repositories include `caelis-labs/acp-go-sdk`. Prefer a dedicated
-bot fine-grained PAT limited to this repository with:
+Require the GitHub Actions `quality` check (integration ID 15368), PRs, resolved
+review conversations, and no force pushes, deletion, or bypass actors on `main`.
+Disable the global up-to-date requirement (`strict=false`) to avoid rebasing and
+retesting every ordinary PR. Keep `refs/tags/v*` protected against deletion and
+non-fast-forward updates; new tag creation remains available to the publisher.
 
-- Contents: read and write (release branch, tag, GitHub Release).
-- Pull requests: read and write (maintain Release PR).
-- Issues: read and write (Release Please lifecycle labels).
+Create the `release-validation` Environment before merging this configuration:
 
-The token owner needs repository write access; satisfy any organization PAT
-approval policy. For an organization secret shared with Caelis, include both
-repositories in the token's repository scope as well as the secret's visibility.
-Secret visibility alone does not prove that the PAT can write to this repo.
-No administration permission, ruleset bypass, workflow-write permission,
-self-approval, or auto-merge permission is required. The ordinary workflow
-`GITHUB_TOKEN` stays read-only, and Actions PR approval can remain disabled.
+- Required reviewer: the maintainer user or team; initial maintainer is
+  `OnslaughtSnail`. Do not give this role to the release bot.
+- Disable administrator bypass. Allow `refs/pull/*/merge` and `main` through the
+  Environment's selected branch policies, covering PR acceptance and recovery.
+- The initiating maintainer may approve their own run, so a single maintainer can
+  dispatch recovery. This is still an explicit recorded approval; no workflow
+  approves itself. Add another reviewer and prevent self-review if adopting a
+  two-person release policy later.
+- No secrets are stored in this Environment. Validation jobs use read-only
+  repository permissions and checkouts without persisted credentials.
 
-Use this dedicated token rather than `GITHUB_TOKEN`: GitHub suppresses most
-follow-on workflows created by `GITHUB_TOKEN`, which would prevent the bot's
-Release PR from receiving CI and the published release from being verified.
-See the [official action authentication guidance](https://github.com/googleapis/release-please-action#github-credentials).
-The action is pinned to the verified `v5.0.0` commit. Only pushes or manual runs
-on `main` can invoke it; no PR job can access the token.
+PR code never receives the release token. Release automation runs trusted main
+workflows. Publication validates GitHub API identities and parses downloaded
+artifacts only as data; it never executes downloaded artifact content. The token
+is made available only to the final publication step after validation succeeds.
 
-## Recovery and publication verification
+## Release bot token
 
-If a token is missing, the workflow fails with a setup message. A 403 after that
-means the token's scope, owner access, expiry, or organization approval needs
-attention. Fix the configuration, then manually run `release-please` on `main`.
-Do not weaken branch protection, inject a personal CLI token, or switch to
-`GITHUB_TOKEN` as a workaround. Retrying Release Please reconciles existing
-release state; inspect any partially created tag/release first.
+Use `RELEASE_PLEASE_TOKEN`, either a repository secret or a selected-repository
+organization secret. Scope the dedicated bot fine-grained PAT to this repository
+with Contents, Pull requests, and Issues read/write. Its owner needs repository
+write access and any required organization approval. For a shared organization
+secret, both secret visibility and the token's repository scope must include the
+SDK. No ruleset bypass or administration access is required by the bot.
 
-If the public proxy is still propagating, rerun only `Verify release` or dispatch
-it on `main` with the published version. The smoke test uses a new module and
-module cache, `GOWORK=off`, `GOPROXY=https://proxy.golang.org`, checksum verification,
-and no `replace` or direct-VCS fallback:
+The ordinary `GITHUB_TOKEN` remains read-only and Actions PR approval can stay
+disabled. The dedicated token lets bot PRs and published releases trigger the
+follow-on CI workflows; see [official authentication guidance](https://github.com/googleapis/release-please-action#github-credentials).
+The Release Please action is pinned to its verified v5.0.0 commit. Its updates
+are serialized and `always-update` stays at the default, avoiding unchanged PR
+refreshes. Missing-token and permission errors must be repaired without weakening
+the release gates or inserting a personal CLI token into Actions secrets.
+
+## Recovery
+
+If the merged release tree differs from the tested candidate, or validation
+artifacts have expired:
+
+1. Dispatch `CI` on `main`, setting `release_pr` to the merged Release PR number.
+   It selects that exact merge commit, not moving main.
+2. Approve `release-validation` and wait for the complete matrix and `quality`.
+3. Dispatch `Publish release` on `main` with `release_pr` and `validation_run`.
+   The same evidence checks run before tagging.
+
+For publication errors after validation, retry `Publish release` with the valid
+run. An existing tag is accepted only if it resolves to the same selected commit;
+it is never changed. A partially created draft release can be completed. An
+already published version is left intact. Release Please lifecycle labels are
+updated after publication.
+
+If only Go Proxy propagation is delayed, rerun `Verify release` for that version.
+Manual verification uses a new module/cache, checksum verification, `GOWORK=off`,
+and the public proxy, with no local replacement or direct-VCS fallback:
 
 ```bash
 bash scripts/consumer-smoke.sh v1.4.0
 ```
 
-With no argument the same script tests the local checkout for PR CI. A local
-`replace` build does not establish that a version has been published.
+With no argument, the script tests the local checkout for PR CI. A local replacement
+build alone does not prove publication. Fix published defects with a new version.
 
-For an exceptional manual recovery, prepare manifest/changelog/README in a PR,
-pass `quality`, merge it, and record the exact protected-main commit and code
-PR's conformance evidence. Check that the version is unused before creating an
-annotated tag and GitHub Release at that commit. Never create a replacement for
-an existing tag. Fix released defects with a new semantic version.
+## Bootstrap
+
+The initial manifest records published `1.3.0`, and `bootstrap-sha` is its release
+commit `36a6825c7e4611d87bc26712f1efaf2dcb24eb34`. Release Please creates the first
+`1.4.0` Release PR from the protocol-alignment feature. Do not pre-bump metadata
+in a feature PR. [The v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) describe
+the optional stable tool name and required experimental v2 message ID changes.
