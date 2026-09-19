@@ -1,6 +1,6 @@
 # ACP Go SDK
 
-[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
+[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/caelis-labs/acp-go-sdk.svg)](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk)
 
 Product-neutral Go SDK for the
@@ -57,19 +57,24 @@ tool-call updates distinguish omission, explicit null (clear), and a string
 
 ## Install
 
+<!-- x-release-please-start-version -->
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.4.0
+go get github.com/caelis-labs/acp-go-sdk@v1.3.0
 ~~~
+<!-- x-release-please-end -->
 
 ## Releases
 
-Release metadata is committed and pushed before a version tag is created. A
-tag may point only to an exact commit on `main` whose complete CI workflow has
-succeeded. The manual release workflow verifies both conditions before it
-creates an annotated tag; it does not rebuild or modify the selected commit.
+Release Please maintains a Release PR with the changelog, version manifest,
+and installation example. Merging that PR publishes an immutable Go module tag
+and GitHub Release from protected `main`. Code changes pass the full PR CI,
+including official SDK interoperability; documentation and release metadata
+receive lightweight validation. Publication verifies a fresh public-proxy
+consumer without repeating the full test matrix.
 
-See [RELEASING.md](RELEASING.md) for the release procedure and post-publication
-pkg.go.dev checks.
+See [RELEASING.md](RELEASING.md) for the release procedure and
+[v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) for the pending protocol
+upgrade.
 
 ## Agent side
 
