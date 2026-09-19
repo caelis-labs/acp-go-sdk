@@ -92,10 +92,12 @@ async function prepare() {
       const jobs = api(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`);
       if (jobs.total_count !== jobs.jobs.length) throw new Error('unexpected paginated CI job list');
       const approvals = api(`actions/runs/${run.id}/approvals`);
+      if (!/^[a-f0-9]{40}$/.test(evidence.head)) throw new Error('invalid evidence head');
+      const associatedPRs = evidence.mode === 'pull_request' ? api(`commits/${evidence.head}/pulls?per_page=100`) : [];
       download(run, `official-sdk-interop-evidence-${run.run_attempt}`, `${directory}/interop`);
       const interopPath = `${directory}/interop/.artifacts/interop/evidence.json`;
       const interop = JSON.parse(readFileSync(interopPath, 'utf8'));
-      verifyReleaseEvidence({repository: repo, pr, run, jobs: jobs.jobs, evidence, tested, target, version, approvals, interop});
+      verifyReleaseEvidence({repository: repo, pr, run, jobs: jobs.jobs, evidence, tested, target, version, approvals, interop, associatedPRs});
       const approved = approvals.filter(review => review.state === 'approved' && review.user?.type === 'User' &&
         review.environments.some(env => env.name === 'release-validation'));
       const maintainer = approved.find(review => ['admin', 'maintain', 'write'].includes(

@@ -66,6 +66,9 @@ Before any tag becomes visible, `Publish release` requires:
 - Evidence matching the PR, version, run, attempt, and tested Git commit. Normal
   PR validation must have the claimed main/head merge parents. Recovery validation
   must test the exact merged release commit.
+- The immutable PR head commit must be associated with that release PR through
+  GitHub's commit-to-PR API. A workflow run's `pull_requests` list can become empty
+  after merge, so it is not the authoritative source for this association.
 - Exact equality between the tested tree and the release commit's tree. Squash
   may change the commit SHA but must not change its contents.
 - Complete, clean cross-SDK evidence from that tested commit and an acceptable
