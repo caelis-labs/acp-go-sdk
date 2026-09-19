@@ -2,15 +2,72 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_pr:
+        description: Merged release PR to revalidate if its tested tree changed before merge
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.release_pr || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      release: ${{ steps.scope.outputs.release }}
+      commit: ${{ steps.scope.outputs.commit }}
+      context: ${{ steps.scope.outputs.context }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: Test CI classification and required-check aggregation
+        run: node --test scripts/*.test.mjs
+      - name: Inspect PR changes and release metadata
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-context.mjs
+      - name: Check diff whitespace
+        env:
+          CONTEXT: ${{ steps.scope.outputs.context }}
+        run: |
+          base=$(node -p 'JSON.parse(process.env.CONTEXT).base')
+          git diff --check "$base" HEAD
+
+  release-approval:
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: release-validation
+    steps:
+      - name: Record approved candidate
+        env:
+          CONTEXT: ${{ needs.changes.outputs.context }}
+        run: echo "$CONTEXT"
+
   test:
+    needs: [changes, release-approval]
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.full == 'true' &&
+      (needs.changes.outputs.release == 'false' || needs.release-approval.result == 'success')
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -20,34 +77,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.changes.outputs.commit }}
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           cache: false
-      - run: make verify-schema
-      - run: make verify-upstream
-      - run: make check-generated
       - run: make test
-      - run: make vet
       - run: go build ./example/...
       - run: bash scripts/consumer-smoke.sh
 
   race-and-static:
+    needs: [changes, release-approval]
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.full == 'true' &&
+      (needs.changes.outputs.release == 'false' || needs.release-approval.result == 'success')
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.changes.outputs.commit }}
       - uses: actions/setup-go@v7
         with:
           go-version: 1.25.x
           cache: false
+      - run: make verify-upstream check-generated vet
+      - name: Check Go formatting
+        run: test -z "$(git ls-files '*.go' | xargs gofmt -l)"
       - run: make test-race
       - run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
       - run: cd cmd/generate && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
 
   windows-stdio:
+    needs: [changes, release-approval]
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.full == 'true' &&
+      (needs.changes.outputs.release == 'false' || needs.release-approval.result == 'success')
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.changes.outputs.commit }}
       - uses: actions/setup-go@v7
         with:
           go-version: 1.25.x
@@ -56,9 +131,17 @@ jobs:
       - run: go test -race -count=10 -run 'TestProcessShutdownTerminatesOwnedProcessTree|TestWindowsShutdownConvergesWhileDescendantsSpawn' ./transport/stdio
 
   official-sdk-interop:
+    needs: [changes, release-approval]
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.full == 'true' &&
+      (needs.changes.outputs.release == 'false' || needs.release-approval.result == 'success')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.changes.outputs.commit }}
       - uses: actions/setup-go@v7
         with:
           go-version: 1.25.x
@@ -73,10 +156,80 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: official-sdk-interop-evidence
+          name: official-sdk-interop-evidence-${{ github.run_attempt }}
           path: |
             .artifacts/interop/
             interop/versions.json
             interop/peers/typescript/package-lock.json
             interop/peers/rust/Cargo.lock
           if-no-files-found: error
+          include-hidden-files: true
+
+  release-acceptance:
+    needs: [changes, release-approval]
+    if: >-
+      !cancelled() && needs.changes.outputs.release == 'true' &&
+      needs.release-approval.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.changes.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.8
+          cache: false
+      - name: Replay fuzz corpus and run bounded fuzzing
+        run: |
+          go test -run '^Fuzz' ./...
+          for target in FuzzRequestID FuzzGeneratedUnions FuzzConnectionFraming; do
+            go test -run '^$' -fuzz "^${target}$" -fuzztime=15s -parallel=2 .
+          done
+      - name: Compare public API with the previous release
+        env:
+          RELEASE_CONTEXT: ${{ needs.changes.outputs.context }}
+        run: bash scripts/release-api.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-acceptance-${{ github.run_attempt }}
+          path: .artifacts/api-diff.txt
+          if-no-files-found: error
+          include-hidden-files: true
+
+  quality:
+    needs: [changes, release-approval, test, race-and-static, windows-stdio, official-sdk-interop, release-acceptance]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.changes.outputs.commit }}
+      - name: Verify all selected checks passed
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FULL: ${{ needs.changes.outputs.full }}
+          RELEASE: ${{ needs.changes.outputs.release }}
+          APPROVAL_RESULT: ${{ needs.release-approval.result }}
+          ACCEPTANCE_RESULT: ${{ needs.release-acceptance.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          RACE_RESULT: ${{ needs.race-and-static.result }}
+          WINDOWS_RESULT: ${{ needs.windows-stdio.result }}
+          INTEROP_RESULT: ${{ needs.official-sdk-interop.result }}
+        run: bash scripts/ci-result.sh
+      - name: Record complete release validation
+        if: needs.changes.outputs.release == 'true'
+        env:
+          RELEASE_CONTEXT: ${{ needs.changes.outputs.context }}
+        run: node scripts/release-evidence.mjs
+      - uses: actions/upload-artifact@v7
+        if: needs.changes.outputs.release == 'true'
+        with:
+          name: release-validation-${{ github.run_attempt }}
+          path: .artifacts/release-validation.json
+          if-no-files-found: error
+          include-hidden-files: true

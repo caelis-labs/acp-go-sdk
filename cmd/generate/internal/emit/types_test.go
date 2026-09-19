@@ -184,6 +184,14 @@ func TestIncludesNullAnyOfWithoutTopLevelType(t *testing.T) {
 
 func TestNullablePresencePropertiesRequireExplicitClearSemantics(t *testing.T) {
 	properties := map[string]*load.Definition{
+		"name": {
+			Description: "Omission means no change, `null` clears the name, and a string replaces it.",
+			Type:        []any{"string", "null"},
+		},
+		"v1Name": {
+			Description: "Omitting it or sending `null` both mean that the existing name is left unchanged.",
+			Type:        []any{"string", "null"},
+		},
 		"title": {
 			Description: "Human-readable title. Set to null to clear.",
 			Type:        []any{"string", "null"},
@@ -198,7 +206,7 @@ func TestNullablePresencePropertiesRequireExplicitClearSemantics(t *testing.T) {
 		},
 	}
 	got := nullablePresenceProperties(properties, map[string]struct{}{"required": {}})
-	if len(got) != 1 || got[0].propName != "title" || got[0].presentName != "hasTitle" {
+	if len(got) != 2 || got[0].propName != "name" || got[0].presentName != "hasName" || got[1].propName != "title" || got[1].presentName != "hasTitle" {
 		t.Fatalf("nullable presence properties = %#v", got)
 	}
 }

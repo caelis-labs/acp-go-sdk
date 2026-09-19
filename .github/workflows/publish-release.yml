@@ -1,0 +1,46 @@
+name: Publish release
+
+on:
+  push:
+    branches: [main]
+    paths: ['.release-please-manifest.json']
+  workflow_dispatch:
+    inputs:
+      release_pr:
+        description: Merged release PR number
+        required: true
+        type: string
+      validation_run:
+        description: Successful approved CI run for this release candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify approval, full CI, conformance and the exact release tree
+        id: validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-release.mjs prepare
+      - name: Publish the validated immutable version
+        if: steps.validation.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: node scripts/publish-release.mjs publish

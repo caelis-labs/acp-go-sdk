@@ -23,9 +23,6 @@ func TestCommittedLockIsConsistent(t *testing.T) {
 	if err := checkLocal(root, lock); err != nil {
 		t.Fatal(err)
 	}
-	if lock.RustSDK.Tag != "v2.1.0" {
-		t.Fatalf("rust pin = %q, want v2.1.0", lock.RustSDK.Tag)
-	}
 }
 
 func TestCheckLocalRejectsMismatchedPins(t *testing.T) {

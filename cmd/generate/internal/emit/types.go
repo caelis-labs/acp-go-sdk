@@ -37,7 +37,8 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 		if _, ok := required[propertyName]; ok || !includesNull(definition) {
 			continue
 		}
-		if !strings.Contains(strings.ToLower(definition.Description), "set to null to clear") {
+		description := strings.ToLower(definition.Description)
+		if !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
 			continue
 		}
 		fieldName := util.ToExportedField(propertyName)

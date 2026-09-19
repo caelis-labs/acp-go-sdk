@@ -1,6 +1,6 @@
 # ACP Go SDK
 
-[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
+[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/caelis-labs/acp-go-sdk.svg)](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk)
 
 Product-neutral Go SDK for the
@@ -25,10 +25,10 @@ and Rust SDK peers.
 | Identity | Pinned value |
 |---|---|
 | Wire protocol | 1 |
-| Schema artifact | 1.21.0 |
-| Schema tag | schema-v1.21.0 |
-| Upstream commit | 272bf799f35a258c6a4107a0410ed361e83683d3 |
-| schema.json SHA256 | caf62ff962ada396878372ced11efb2c6764e59d90919a38583c319948931a42 |
+| Schema artifact | 1.23.0 |
+| Schema tag | schema-v1.23.0 |
+| Upstream commit | 6d08f412a7a1370d3cc9a124e3be3d6acf92641e |
+| schema.json SHA256 | 3c17bd6385d90cf672d8a661fddc359d73422cf8b8ce6865213d25cfd4c0eca7 |
 
 The exact tag object, commit, assets, and hashes are recorded in
 schema/lock.json. Generated stable code uses schema/schema.json only;
@@ -41,27 +41,39 @@ queries GitHub releases and opens an `upstream-drift` issue when a pin is
 behind.
 
 Draft ACP v2 lives in `experimental/v2`. It is generated from
-`schema-v2.0.0-alpha.3` and is not a stable API. `session/prompt` acknowledges
-acceptance only; running/idle/requires_action are `session/update` state
-updates. Its typed dispatch and lifecycle have Go loopback coverage; the
-official TypeScript/Rust interoperability gate currently covers stable ACP v1.
+`schema-v2.0.0-alpha.5` and is not a stable API. `session/prompt` returns the
+required `messageId` of the user message inserted into the conversation;
+the matching user-message update may arrive before or after that response.
+Running/idle/requires_action are `session/update` state updates. Its typed
+dispatch and lifecycle have Go loopback coverage; the official TypeScript/Rust
+interoperability gate currently covers stable ACP v1.
 Do not import this package from the stable root.
+
+Tool calls expose an optional programmatic `name`. In stable v1 updates, omitted
+or null names leave an existing name unchanged; `WithStartName` and
+`WithUpdateName` set a name through the session-update helpers. In v2,
+tool-call updates distinguish omission, explicit null (clear), and a string
+(replace) through `NameState`, `SetName`, `ClearName`, and `UnsetName`.
 
 ## Install
 
+<!-- x-release-please-start-version -->
 ~~~bash
 go get github.com/caelis-labs/acp-go-sdk@v1.3.0
 ~~~
+<!-- x-release-please-end -->
 
 ## Releases
 
-Release metadata is committed and pushed before a version tag is created. A
-tag may point only to an exact commit on `main` whose complete CI workflow has
-succeeded. The manual release workflow verifies both conditions before it
-creates an annotated tag; it does not rebuild or modify the selected commit.
+Release Please maintains the version, changelog, and installation example in a
+Release PR. A maintainer approves its complete CI before merging. Publication
+verifies that the merged release contains exactly the tested Git tree before
+creating an immutable tag and GitHub Release. Ordinary PRs do not need to track
+every main update; release version bumps always require the full matrix,
+including race checks, Windows stdio, and official SDK interoperability.
 
-See [RELEASING.md](RELEASING.md) for the release procedure and post-publication
-pkg.go.dev checks.
+See [RELEASING.md](RELEASING.md) for approval, validation, publication and recovery,
+and [v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) for the protocol upgrade.
 
 ## Agent side
 

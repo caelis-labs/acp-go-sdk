@@ -30,6 +30,8 @@ func FuzzGeneratedUnions(f *testing.F) {
 	for _, seed := range []string{
 		`{"type":"text","text":"hello"}`,
 		`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}`,
+		`{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Read","status":"pending","name":"read_file"}`,
+		`{"sessionUpdate":"tool_call_update","toolCallId":"call-1","name":null}`,
 		`{"mode":"form","message":"m","requestedSchema":{"type":"object","properties":{}}}`,
 		`null`,
 		`{}`,

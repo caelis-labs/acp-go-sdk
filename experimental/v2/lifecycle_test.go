@@ -13,7 +13,8 @@ import (
 )
 
 type loopbackAgent struct {
-	conn *AgentSideConnection
+	conn       *AgentSideConnection
+	echoBefore bool
 }
 
 func (a *loopbackAgent) LoginAuth(context.Context, LoginAuthRequest) (LoginAuthResponse, error) {
@@ -32,17 +33,41 @@ func (a *loopbackAgent) NewSession(context.Context, NewSessionRequest) (NewSessi
 	return NewSessionResponse{SessionId: "sess-1"}, nil
 }
 func (a *loopbackAgent) Prompt(ctx context.Context, params PromptRequest) (PromptResponse, error) {
-	go func() {
-		_ = a.conn.SessionUpdate(context.Background(), UpdateSessionNotification{
+	const messageID MessageId = "message-1"
+	echo := func(ctx context.Context) error {
+		return a.conn.SessionUpdate(ctx, UpdateSessionNotification{
+			SessionId: params.SessionId,
+			Update: SessionUpdate{UserMessage: &SessionUpdateUserMessage{
+				MessageId: messageID,
+				Content:   params.Prompt,
+			}},
+		})
+	}
+	if a.echoBefore {
+		if err := echo(ctx); err != nil {
+			return PromptResponse{}, err
+		}
+	}
+	if err := acp.AfterResponse(ctx, func(ctx context.Context) error {
+		if !a.echoBefore {
+			if err := echo(ctx); err != nil {
+				return err
+			}
+		}
+		if err := a.conn.SessionUpdate(ctx, UpdateSessionNotification{
 			SessionId: params.SessionId,
 			Update:    RunningUpdate(),
-		})
-		_ = a.conn.SessionUpdate(context.Background(), UpdateSessionNotification{
+		}); err != nil {
+			return err
+		}
+		return a.conn.SessionUpdate(ctx, UpdateSessionNotification{
 			SessionId: params.SessionId,
 			Update:    IdleUpdate(StopReasonEndTurn),
 		})
-	}()
-	return PromptResponse{}, nil
+	}); err != nil {
+		return PromptResponse{}, err
+	}
+	return PromptResponse{MessageId: messageID}, nil
 }
 func (a *loopbackAgent) Cancel(context.Context, CancelSessionNotification) error { return nil }
 
@@ -60,7 +85,7 @@ func (c *loopbackClient) SessionUpdate(_ context.Context, params UpdateSessionNo
 	c.updates = append(c.updates, params.Update)
 	n := len(c.updates)
 	c.mu.Unlock()
-	if n == 2 {
+	if n == 3 {
 		select {
 		case <-c.idle:
 		default:
@@ -70,10 +95,16 @@ func (c *loopbackClient) SessionUpdate(_ context.Context, params UpdateSessionNo
 	return nil
 }
 
-func TestV2PromptAckThenStateUpdates(t *testing.T) {
+func TestV2PromptInsertionAndStateUpdates(t *testing.T) {
 	t.Parallel()
+	t.Run("echo-before-response", func(t *testing.T) { testV2PromptInsertion(t, true) })
+	t.Run("echo-after-response", func(t *testing.T) { testV2PromptInsertion(t, false) })
+}
+
+func testV2PromptInsertion(t *testing.T, echoBefore bool) {
+	t.Helper()
 	agentSide, clientSide := net.Pipe()
-	agentImpl := &loopbackAgent{}
+	agentImpl := &loopbackAgent{echoBefore: echoBefore}
 	agent, err := NewAgentSideConnection(agentImpl, agentSide, agentSide)
 	if err != nil {
 		t.Fatal(err)
@@ -113,8 +144,8 @@ func TestV2PromptAckThenStateUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ack.Meta != nil {
-		t.Fatalf("prompt ACK should be empty, got %#v", ack)
+	if ack.MessageId != "message-1" {
+		t.Fatalf("prompt response message ID = %q", ack.MessageId)
 	}
 
 	select {
@@ -124,17 +155,21 @@ func TestV2PromptAckThenStateUpdates(t *testing.T) {
 	}
 	clientImpl.mu.Lock()
 	defer clientImpl.mu.Unlock()
-	if len(clientImpl.updates) != 2 {
-		t.Fatalf("updates = %d, want 2", len(clientImpl.updates))
+	if len(clientImpl.updates) != 3 {
+		t.Fatalf("updates = %d, want 3", len(clientImpl.updates))
 	}
-	if clientImpl.updates[0].StateUpdate == nil || *clientImpl.updates[0].StateUpdate.State != "running" {
-		t.Fatalf("first update = %#v", clientImpl.updates[0].StateUpdate)
+	message := clientImpl.updates[0].UserMessage
+	if message == nil || message.MessageId != ack.MessageId || len(message.Content) != 1 || message.Content[0].Text == nil || message.Content[0].Text.Text != "hello" {
+		t.Fatalf("user message = %#v, want echoed prompt with message ID %q", message, ack.MessageId)
 	}
-	if clientImpl.updates[1].StateUpdate == nil || *clientImpl.updates[1].StateUpdate.State != "idle" {
+	if clientImpl.updates[1].StateUpdate == nil || *clientImpl.updates[1].StateUpdate.State != "running" {
 		t.Fatalf("second update = %#v", clientImpl.updates[1].StateUpdate)
 	}
-	if clientImpl.updates[1].StateUpdate.StopReason == nil || *clientImpl.updates[1].StateUpdate.StopReason != StopReasonEndTurn {
-		t.Fatalf("idle stopReason = %#v", clientImpl.updates[1].StateUpdate.StopReason)
+	if clientImpl.updates[2].StateUpdate == nil || *clientImpl.updates[2].StateUpdate.State != "idle" {
+		t.Fatalf("third update = %#v", clientImpl.updates[2].StateUpdate)
+	}
+	if clientImpl.updates[2].StateUpdate.StopReason == nil || *clientImpl.updates[2].StateUpdate.StopReason != StopReasonEndTurn {
+		t.Fatalf("idle stopReason = %#v", clientImpl.updates[2].StateUpdate.StopReason)
 	}
 }
 
