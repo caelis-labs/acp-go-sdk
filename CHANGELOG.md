@@ -2,6 +2,44 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.0](https://github.com/caelis-labs/acp-go-sdk/compare/v1.3.0...v1.4.0) (2026-09-19)
+
+
+### Features
+
+* align official ACP schemas and automate releases ([#7](https://github.com/caelis-labs/acp-go-sdk/issues/7)) ([27415db](https://github.com/caelis-labs/acp-go-sdk/commit/27415db1654963b3ac33f2138151bca943ab27ae))
+
+### Protocol and compatibility
+
+- Pin the stable wire schema to official `schema-v1.23.0` and the isolated
+  experimental v2 schema to `schema-v2.0.0-alpha.5`, with exact upstream commit
+  and SHA256 verification. Stable protocol negotiation remains ACP v1.
+- Stable tool calls, updates, and permission requests gain optional programmatic
+  `name` fields, with `WithStartName` and `WithUpdateName` helpers. Existing stable
+  interfaces remain compatible; custom wire-to-domain mappings need to forward
+  the new field to use it.
+- Experimental v2 prompt responses now require `messageId`. Agents must return
+  the inserted user message ID and echo the user message with the same ID;
+  clients reject missing or null IDs. The echo can precede or follow the response.
+  Experimental v2 tool-name patches preserve absent, null (clear), and string
+  states. These changes remain isolated from the stable root package.
+- Validate bidirectional interoperation with the pinned official TypeScript
+  SDK v1.4.0 and Rust SDK v2.2.0 across the complete 12-case matrix.
+
+See [the v1.4.0 migration notes](https://github.com/caelis-labs/acp-go-sdk/blob/v1.4.0/docs/upgrading-to-v1.4.0.md)
+for downstream integration details.
+
+### Release reliability
+
+- Release Please maintains version metadata and release notes. Every version
+  increase requires maintainer approval followed by complete CI, bounded fuzzing,
+  and a public API compatibility check before merge and publication.
+- Publication verifies that the released Git tree exactly matches the approved,
+  tested candidate and attaches validation, API diff, and cross-SDK evidence.
+  Published tags are immutable; a fresh public Go Proxy consumer verifies delivery.
+- Ordinary PRs do not need to track every main update. Documentation-only changes
+  use lightweight checks, and publication does not repeat the full CI matrix.
+
 ## [v1.3.0] - 2026-09-11
 
 ### JSON-RPC transport
