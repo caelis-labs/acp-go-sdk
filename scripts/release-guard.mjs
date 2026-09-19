@@ -1,7 +1,7 @@
 export const releaseJobs = ['changes', 'release-approval', 'test (1.23.x)', 'test (1.25.x)',
   'race-and-static', 'windows-stdio', 'official-sdk-interop', 'release-acceptance', 'quality'];
 
-export function verifyReleaseEvidence({repository, pr, run, jobs, evidence, tested, target, version, approvals, interop}) {
+export function verifyReleaseEvidence({repository, pr, run, jobs, evidence, tested, target, version, approvals, interop, associatedPRs = []}) {
   const check = (ok, message) => { if (!ok) throw new Error(message); };
   const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
   check(pr.merged && pr.base.ref === 'main' && pr.head.repo?.full_name === repository, 'release PR must be merged into main from this repository');
@@ -21,8 +21,14 @@ export function verifyReleaseEvidence({repository, pr, run, jobs, evidence, test
   check(tested.sha === evidence.commit && tested.tree.sha === evidence.tree && target.sha === pr.merge_commit_sha &&
     target.tree.sha === evidence.tree, 'published tree differs from the tested candidate; revalidate the merged release PR');
   if (evidence.mode === 'pull_request') {
+    // GitHub can empty workflow_run.pull_requests after merge. The immutable
+    // head commit's associated PRs remain available and identify the release PR.
     check(run.event === 'pull_request' && run.head_sha === evidence.head &&
-      run.pull_requests.some(item => item.number === pr.number && item.head.sha === evidence.head), 'CI does not belong to this PR head');
+      associatedPRs.some(item => item.number === pr.number && item.head?.sha === evidence.head &&
+        item.head.repo?.full_name === repository && item.base?.ref === 'main' &&
+        item.merge_commit_sha === pr.merge_commit_sha), 'CI does not belong to this PR head');
+    check(!run.pull_requests?.length || run.pull_requests.some(item => item.number === pr.number && item.head.sha === evidence.head),
+      'workflow run has conflicting PR association');
     check(tested.parents.length === 2 && tested.parents[0].sha === evidence.base && tested.parents[1].sha === evidence.head,
       'CI did not validate the claimed PR merge candidate');
   } else {

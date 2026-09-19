@@ -8,6 +8,7 @@ function fixture() {
   return {
     repository, version: '1.4.0',
     pr: {number: 8, merged: true, base: {ref: 'main'}, head: {sha: head, repo: {full_name: repository}}, merge_commit_sha: target},
+    associatedPRs: [{number: 8, base: {ref: 'main'}, head: {sha: head, repo: {full_name: repository}}, merge_commit_sha: target}],
     run: {id: 123, run_attempt: 2, status: 'completed', conclusion: 'success', path: '.github/workflows/ci.yml',
       event: 'pull_request', head_sha: head, head_repository: {full_name: repository}, pull_requests: [{number: 8, head: {sha: head}}]},
     jobs: releaseJobs.map(name => ({name, conclusion: 'success'})),
@@ -21,6 +22,12 @@ function fixture() {
 }
 
 test('squash commit may differ while the validated tree stays identical', () => verifyReleaseEvidence(fixture()));
+
+test('merged PR remains verifiable when GitHub empties the run PR list', () => {
+  const f = fixture();
+  f.run.pull_requests = [];
+  verifyReleaseEvidence(f);
+});
 
 test('explicit recovery validates the exact merged commit', () => {
   const f = fixture();
@@ -57,7 +64,13 @@ for (const [name, mutate] of [
   ['wrong base parent', f => f.tested.parents[0].sha = 'f'.repeat(40)],
   ['wrong head parent', f => f.tested.parents[1].sha = 'f'.repeat(40)],
   ['unrelated run head', f => f.run.head_sha = 'f'.repeat(40)],
-  ['unrelated PR run', f => f.run.pull_requests = []],
+  ['missing commit PR association', f => f.associatedPRs = []],
+  ['unrelated associated PR', f => f.associatedPRs[0].number++],
+  ['different associated head', f => f.associatedPRs[0].head.sha = 'f'.repeat(40)],
+  ['foreign associated repository', f => f.associatedPRs[0].head.repo.full_name = 'fork/sdk'],
+  ['different associated base', f => f.associatedPRs[0].base.ref = 'development'],
+  ['different associated merge', f => f.associatedPRs[0].merge_commit_sha = 'f'.repeat(40)],
+  ['conflicting run PR list', f => f.run.pull_requests[0].number++],
   ['unrecognized validation mode', f => f.evidence.mode = 'push'],
   ['missing interop cases', f => f.interop.matrixComplete = false],
   ['dirty conformance checkout', f => f.interop.dirty = true],
