@@ -25,10 +25,10 @@ and Rust SDK peers.
 | Identity | Pinned value |
 |---|---|
 | Wire protocol | 1 |
-| Schema artifact | 1.21.0 |
-| Schema tag | schema-v1.21.0 |
-| Upstream commit | 272bf799f35a258c6a4107a0410ed361e83683d3 |
-| schema.json SHA256 | caf62ff962ada396878372ced11efb2c6764e59d90919a38583c319948931a42 |
+| Schema artifact | 1.23.0 |
+| Schema tag | schema-v1.23.0 |
+| Upstream commit | 6d08f412a7a1370d3cc9a124e3be3d6acf92641e |
+| schema.json SHA256 | 3c17bd6385d90cf672d8a661fddc359d73422cf8b8ce6865213d25cfd4c0eca7 |
 
 The exact tag object, commit, assets, and hashes are recorded in
 schema/lock.json. Generated stable code uses schema/schema.json only;
@@ -41,16 +41,24 @@ queries GitHub releases and opens an `upstream-drift` issue when a pin is
 behind.
 
 Draft ACP v2 lives in `experimental/v2`. It is generated from
-`schema-v2.0.0-alpha.3` and is not a stable API. `session/prompt` acknowledges
-acceptance only; running/idle/requires_action are `session/update` state
-updates. Its typed dispatch and lifecycle have Go loopback coverage; the
-official TypeScript/Rust interoperability gate currently covers stable ACP v1.
+`schema-v2.0.0-alpha.5` and is not a stable API. `session/prompt` returns the
+required `messageId` of the user message inserted into the conversation;
+the matching user-message update may arrive before or after that response.
+Running/idle/requires_action are `session/update` state updates. Its typed
+dispatch and lifecycle have Go loopback coverage; the official TypeScript/Rust
+interoperability gate currently covers stable ACP v1.
 Do not import this package from the stable root.
+
+Tool calls expose an optional programmatic `name`. In stable v1 updates, omitted
+or null names leave an existing name unchanged; `WithStartName` and
+`WithUpdateName` set a name through the session-update helpers. In v2,
+tool-call updates distinguish omission, explicit null (clear), and a string
+(replace) through `NameState`, `SetName`, `ClearName`, and `UnsetName`.
 
 ## Install
 
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.3.0
+go get github.com/caelis-labs/acp-go-sdk@v1.4.0
 ~~~
 
 ## Releases

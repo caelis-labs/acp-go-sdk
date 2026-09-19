@@ -127,6 +127,13 @@ func StartToolCall(id ToolCallId, title string, opts ...ToolCallStartOpt) Sessio
 	return SessionUpdate{ToolCall: &tc}
 }
 
+// WithStartName sets the programmatic tool name for a tool_call start update.
+func WithStartName(name string) ToolCallStartOpt {
+	return func(tc *SessionUpdateToolCall) {
+		tc.Name = Ptr(name)
+	}
+}
+
 // WithStartKind sets the kind for a tool_call start update.
 func WithStartKind(k ToolKind) ToolCallStartOpt {
 	return func(tc *SessionUpdateToolCall) {
@@ -190,6 +197,13 @@ func UpdateToolCall(id ToolCallId, opts ...ToolCallUpdateOpt) SessionUpdate {
 		opt(&tu)
 	}
 	return SessionUpdate{ToolCallUpdate: &tu}
+}
+
+// WithUpdateName sets the programmatic tool name for a tool_call_update.
+func WithUpdateName(name string) ToolCallUpdateOpt {
+	return func(tu *SessionToolCallUpdate) {
+		tu.Name = Ptr(name)
+	}
 }
 
 // WithUpdateTitle sets the title for a tool_call_update.

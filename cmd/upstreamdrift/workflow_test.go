@@ -31,7 +31,9 @@ func TestWorkflowCreatesIssueOnDrift(t *testing.T) {
 		case strings.Contains(r.URL.Path, "typescript-sdk"):
 			_ = json.NewEncoder(w).Encode(githubRelease{TagName: "v1.4.0"})
 		case strings.Contains(r.URL.Path, "rust-sdk"):
-			_ = json.NewEncoder(w).Encode(githubRelease{TagName: "v2.2.0"})
+			// Keep this synthetic release ahead of real pins so routine lock
+			// updates do not remove the drift this workflow test exercises.
+			_ = json.NewEncoder(w).Encode(githubRelease{TagName: "v999.0.0"})
 		default:
 			http.NotFound(w, r)
 		}

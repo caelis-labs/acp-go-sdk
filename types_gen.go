@@ -8896,6 +8896,11 @@ type SessionUpdateToolCall struct {
 	// File locations affected by this tool call.
 	// Enables "follow-along" features in clients.
 	Locations []ToolCallLocation `json:"locations,omitempty"`
+	// Programmatic name of the tool being invoked.
+	//
+	// This field is optional. Omitting it or sending 'null' both mean that no
+	// tool name is available.
+	Name *string `json:"name,omitempty"`
 	// Raw input parameters sent to the tool.
 	RawInput any `json:"rawInput,omitempty"`
 	// Raw output returned by the tool.
@@ -8923,6 +8928,11 @@ type SessionToolCallUpdate struct {
 	Kind *ToolKind `json:"kind,omitempty"`
 	// Replace the locations collection.
 	Locations []ToolCallLocation `json:"locations,omitempty"`
+	// Update the programmatic name of the tool being invoked.
+	//
+	// This field is optional. Omitting it or sending 'null' both mean that
+	// the existing name is left unchanged.
+	Name *string `json:"name,omitempty"`
 	// Update the raw input.
 	RawInput any `json:"rawInput,omitempty"`
 	// Update the raw output.
@@ -10522,6 +10532,11 @@ type ToolCall struct {
 	// File locations affected by this tool call.
 	// Enables "follow-along" features in clients.
 	Locations []ToolCallLocation `json:"locations,omitempty"`
+	// Programmatic name of the tool being invoked.
+	//
+	// This field is optional. Omitting it or sending 'null' both mean that no
+	// tool name is available.
+	Name *string `json:"name,omitempty"`
 	// Raw input parameters sent to the tool.
 	RawInput any `json:"rawInput,omitempty"`
 	// Raw output returned by the tool.
@@ -10911,6 +10926,11 @@ type ToolCallUpdate struct {
 	Kind *ToolKind `json:"kind,omitempty"`
 	// Replace the locations collection.
 	Locations []ToolCallLocation `json:"locations,omitempty"`
+	// Update the programmatic name of the tool being invoked.
+	//
+	// This field is optional. Omitting it or sending 'null' both mean that
+	// the existing name is left unchanged.
+	Name *string `json:"name,omitempty"`
 	// Update the raw input.
 	RawInput any `json:"rawInput,omitempty"`
 	// Update the raw output.

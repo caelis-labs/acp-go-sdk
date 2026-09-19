@@ -7616,9 +7616,10 @@ func (v *PromptRequest) Validate() error {
 	return nil
 }
 
-// Response acknowledging that a user prompt was accepted.
+// Response acknowledging that a user prompt was inserted into the ACP conversation.
 //
-// This response does not indicate that the agent has finished processing.
+// This response does not indicate that the prompt was merely received or queued, nor that the
+// agent has finished processing it.
 // Processing and completion are reported through 'state_update' session updates.
 //
 // See protocol docs: [Prompt Accepted](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#2-prompt-accepted)
@@ -7629,6 +7630,38 @@ type PromptResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Identifies the user message inserted into the ACP conversation.
+	//
+	// Required and non-null. Omission and explicit 'null' are both invalid.
+	//
+	// The corresponding user-message session update carries this same identifier and may arrive
+	// before or after this response. Agents must echo the message during the live session, but are
+	// not required to retain it. If retained and replayed, the message keeps this identifier.
+	MessageId MessageId `json:"messageId"`
+}
+
+func (v *PromptResponse) UnmarshalJSON(b []byte) error {
+	*v = PromptResponse{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["messageId"]
+		if !ok {
+			return fmt.Errorf("messageId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("messageId must not be null")
+		}
+	}
+	type Alias PromptResponse
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = PromptResponse(a)
+	return nil
 }
 
 func (v *PromptResponse) Validate() error {
@@ -7680,7 +7713,7 @@ type ProtocolVersion uint16
 // Inclusive cursor describing where replayed session history should begin.
 //
 // Replay includes the position identified by the cursor.
-// Replay the whole conversation from its first replayable entry.
+// Replay all retained conversation history from its first replayable entry.
 type ReplayFromStartInline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -7703,7 +7736,7 @@ type ReplayFromStartInline struct {
 type ReplayFromOther = json.RawMessage
 
 type ReplayFrom struct {
-	// Replay the whole conversation from its first replayable entry.
+	// Replay all retained conversation history from its first replayable entry.
 	Start *ReplayFromStartInline `json:"-"`
 	// Custom or future replay cursor.
 	//
@@ -7830,7 +7863,7 @@ func (u *ReplayFrom) Validate() error {
 	return nil
 }
 
-// Inclusive replay cursor requesting replay from the start of the conversation.
+// Inclusive replay cursor requesting replay from the start of retained conversation history.
 type ReplayFromStart struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -8615,7 +8648,7 @@ func (v *ResourceLink) UnmarshalJSON(b []byte) error {
 
 // Request parameters for resuming an existing session.
 //
-// Resumes an existing session and optionally replays prior conversation
+// Resumes an existing session and optionally replays retained conversation
 // history according to 'replayFrom'.
 type ResumeSessionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -8640,8 +8673,8 @@ type ResumeSessionRequest struct {
 	// Optional. Omitted or 'null' both mean the Agent should resume without
 	// replaying previous conversation history. Replay cursors are inclusive:
 	// replay includes the position identified by the cursor. Supplying
-	// '{ "type": "start" }' means the Agent should replay the whole
-	// conversation before responding.
+	// '{ "type": "start" }' means the Agent should replay all retained
+	// conversation history before responding.
 	ReplayFrom *ReplayFrom `json:"replayFrom,omitempty"`
 	// The ID of the session to resume.
 	SessionId SessionId `json:"sessionId"`
@@ -9863,6 +9896,13 @@ type SessionToolCallUpdate struct {
 	// File locations affected by this tool call.
 	// Enables "follow-along" features in clients.
 	Locations []ToolCallLocation `json:"locations,omitempty"`
+	// Programmatic name of the tool being invoked.
+	//
+	// This field is optional and has patch semantics. Omission means no
+	// change, 'null' clears the name, and a string replaces it. For a tool
+	// call ID the client has not seen before, omission or 'null' means that no
+	// tool name is available.
+	Name *string `json:"name,omitempty"`
 	// Raw input parameters sent to the tool.
 	RawInput any `json:"rawInput,omitempty"`
 	// Raw output returned by the tool.
@@ -9874,6 +9914,91 @@ type SessionToolCallUpdate struct {
 	Title *string `json:"title,omitempty"`
 	// Unique identifier for this tool call within the session.
 	ToolCallId ToolCallId `json:"toolCallId"`
+	hasName    bool       `json:"-"`
+}
+
+func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionToolCallUpdate
+	a := Alias(v)
+	var _nameJSON json.RawMessage
+	if a.Name != nil {
+		encoded, err := json.Marshal(*a.Name)
+		if err != nil {
+			return nil, err
+		}
+		_nameJSON = encoded
+	} else if a.hasName {
+		_nameJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Name json.RawMessage `json:"name,omitempty"`
+	}{
+		Alias: a,
+		Name:  _nameJSON,
+	})
+}
+
+func (v *SessionToolCallUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionToolCallUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	{
+		raw, ok := m["toolCallId"]
+		if !ok {
+			return fmt.Errorf("toolCallId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("toolCallId must not be null")
+		}
+	}
+	type Alias SessionToolCallUpdate
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	{
+		_, present := m["name"]
+		a.hasName = present
+	}
+	*v = SessionToolCallUpdate(a)
+	return nil
+}
+
+func (v SessionToolCallUpdate) NameState() NullableFieldState {
+	if v.Name != nil {
+		return NullableFieldValue
+	}
+	if v.hasName {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetName(value string) {
+	v.Name = &value
+	v.hasName = true
+}
+
+func (v *SessionToolCallUpdate) ClearName() {
+	v.Name = nil
+	v.hasName = true
+}
+
+func (v *SessionToolCallUpdate) UnsetName() {
+	v.Name = nil
+	v.hasName = false
 }
 
 // An agent-owned terminal has been created or updated.
@@ -12743,6 +12868,13 @@ type ToolCallUpdate struct {
 	// File locations affected by this tool call.
 	// Enables "follow-along" features in clients.
 	Locations []ToolCallLocation `json:"locations,omitempty"`
+	// Programmatic name of the tool being invoked.
+	//
+	// This field is optional and has patch semantics. Omission means no
+	// change, 'null' clears the name, and a string replaces it. For a tool
+	// call ID the client has not seen before, omission or 'null' means that no
+	// tool name is available.
+	Name *string `json:"name,omitempty"`
 	// Raw input parameters sent to the tool.
 	RawInput any `json:"rawInput,omitempty"`
 	// Raw output returned by the tool.
@@ -12753,6 +12885,30 @@ type ToolCallUpdate struct {
 	Title *string `json:"title,omitempty"`
 	// Unique identifier for this tool call within the session.
 	ToolCallId ToolCallId `json:"toolCallId"`
+	hasName    bool       `json:"-"`
+}
+
+func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
+	type Alias ToolCallUpdate
+	var a Alias
+	a = Alias(v)
+	var _nameJSON json.RawMessage
+	if a.Name != nil {
+		encoded, err := json.Marshal(*a.Name)
+		if err != nil {
+			return nil, err
+		}
+		_nameJSON = encoded
+	} else if a.hasName {
+		_nameJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Name json.RawMessage `json:"name,omitempty"`
+	}{
+		Alias: a,
+		Name:  _nameJSON,
+	})
 }
 
 func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
@@ -12775,8 +12931,37 @@ func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
 	}
+	{
+		_, present := m["name"]
+		a.hasName = present
+	}
 	*v = ToolCallUpdate(a)
 	return nil
+}
+
+func (v ToolCallUpdate) NameState() NullableFieldState {
+	if v.Name != nil {
+		return NullableFieldValue
+	}
+	if v.hasName {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetName(value string) {
+	v.Name = &value
+	v.hasName = true
+}
+
+func (v *ToolCallUpdate) ClearName() {
+	v.Name = nil
+	v.hasName = true
+}
+
+func (v *ToolCallUpdate) UnsetName() {
+	v.Name = nil
+	v.hasName = false
 }
 
 func (v *ToolCallUpdate) Validate() error {
@@ -13028,7 +13213,7 @@ type AgentSessionLister interface {
 type AgentSessionResumer interface {
 	// Request parameters for resuming an existing session.
 	//
-	// Resumes an existing session and optionally replays prior conversation
+	// Resumes an existing session and optionally replays retained conversation
 	// history according to 'replayFrom'.
 	ResumeSession(ctx context.Context, params ResumeSessionRequest) (ResumeSessionResponse, error)
 }
