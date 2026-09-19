@@ -59,7 +59,7 @@ tool-call updates distinguish omission, explicit null (clear), and a string
 
 <!-- x-release-please-start-version -->
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.3.0
+go get github.com/caelis-labs/acp-go-sdk@v1.4.0
 ~~~
 <!-- x-release-please-end -->
 

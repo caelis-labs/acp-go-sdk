@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.0](https://github.com/caelis-labs/acp-go-sdk/compare/v1.3.0...v1.4.0) (2026-09-19)
+
+
+### Features
+
+* align official ACP schemas and automate releases ([#7](https://github.com/caelis-labs/acp-go-sdk/issues/7)) ([27415db](https://github.com/caelis-labs/acp-go-sdk/commit/27415db1654963b3ac33f2138151bca943ab27ae))
+
 ## [v1.3.0] - 2026-09-11
 
 ### JSON-RPC transport
