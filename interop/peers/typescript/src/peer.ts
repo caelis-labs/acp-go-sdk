@@ -118,7 +118,7 @@ async function runAgent(options: Options): Promise<void> {
       authMethods: [],
       agentInfo: {
         name: "typescript-interop-agent",
-        version: "1.4.0",
+        version: "1.5.0",
       },
     }))
     .onRequest(acp.methods.agent.session.new, () => {
@@ -314,7 +314,7 @@ async function runClient(options: Options): Promise<void> {
         clientCapabilities: {},
         clientInfo: {
           name: "typescript-interop-client",
-          version: "1.4.0",
+          version: "1.5.0",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;

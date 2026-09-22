@@ -8,8 +8,8 @@
   },
   "typescriptSdk": {
     "repository": "https://github.com/agentclientprotocol/typescript-sdk",
-    "tag": "v1.4.0",
-    "commit": "e6463f444093ed7c5f1cc937c3f32afb5853e906"
+    "tag": "v1.5.0",
+    "commit": "f1ba3a935df42efb4455be9b62c76b06610aaf50"
   },
   "rustSdk": {
     "repository": "https://github.com/agentclientprotocol/rust-sdk",
