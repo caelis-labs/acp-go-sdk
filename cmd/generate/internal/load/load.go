@@ -51,6 +51,10 @@ type Definition struct {
 	// Default holds the JSON Schema default value, when present.
 	// Used by generators to synthesize defaulting behavior.
 	Default any `json:"default"`
+	// DeserializeDefaultOnError and DeserializeSkipInvalidItems describe
+	// receiver-side recovery for schema fields, independently of JSON defaults.
+	DeserializeDefaultOnError   bool `json:"x-deserialize-default-on-error"`
+	DeserializeSkipInvalidItems bool `json:"x-deserialize-skip-invalid-items"`
 	// Discriminator specifies which property name distinguishes union variants.
 	// Part of JSON Schema's discriminator object support.
 	Discriminator *Discriminator `json:"discriminator,omitempty"`

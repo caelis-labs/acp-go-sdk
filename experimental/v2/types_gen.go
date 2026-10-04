@@ -6948,6 +6948,12 @@ type NewSessionResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Initial commands the agent can execute in this session.
+	//
+	// Optional. Omitted or empty means no initial commands are advertised.
+	// Senders MUST use an array, not 'null'; receivers treat 'null' like omission.
+	// Later 'available_commands_update' notifications replace this list.
+	AvailableCommands []AvailableCommand `json:"availableCommands,omitempty"`
 	// Initial session configuration options.
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	// Unique identifier for the created session.
@@ -6973,8 +6979,22 @@ func (v *NewSessionResponse) UnmarshalJSON(b []byte) error {
 	}
 	type Alias NewSessionResponse
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		AvailableCommands json.RawMessage `json:"availableCommands"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	var items []json.RawMessage
+	if json.Unmarshal(raw.AvailableCommands, &items) == nil {
+		for _, item := range items {
+			var command AvailableCommand
+			if json.Unmarshal(item, &command) == nil {
+				a.AvailableCommands = append(a.AvailableCommands, command)
+			}
+		}
 	}
 	*v = NewSessionResponse(a)
 	return nil
@@ -8725,8 +8745,43 @@ type ResumeSessionResponse struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Initial commands the agent can execute in this session.
+	//
+	// Optional. Omitted or empty means no initial commands are advertised.
+	// Senders MUST use an array, not 'null'; receivers treat 'null' like omission.
+	// Later 'available_commands_update' notifications replace this list.
+	AvailableCommands []AvailableCommand `json:"availableCommands,omitempty"`
 	// Initial session configuration options.
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+}
+
+func (v *ResumeSessionResponse) UnmarshalJSON(b []byte) error {
+	*v = ResumeSessionResponse{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias ResumeSessionResponse
+	var a Alias
+	var raw struct {
+		Alias
+		AvailableCommands json.RawMessage `json:"availableCommands"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	var items []json.RawMessage
+	if json.Unmarshal(raw.AvailableCommands, &items) == nil {
+		for _, item := range items {
+			var command AvailableCommand
+			if json.Unmarshal(item, &command) == nil {
+				a.AvailableCommands = append(a.AvailableCommands, command)
+			}
+		}
+	}
+	*v = ResumeSessionResponse(a)
+	return nil
 }
 
 func (v *ResumeSessionResponse) Validate() error {

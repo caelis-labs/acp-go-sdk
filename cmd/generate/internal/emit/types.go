@@ -24,6 +24,41 @@ type nullablePresenceProp struct {
 	definition  *load.Definition
 }
 
+// initialCommandsProperty deliberately limits recovery to the newly released
+// session response field. Applying these markers to older fields would change
+// existing decoding behavior and requires a separate compatibility review.
+func initialCommandsProperty(def *load.Definition) *load.Definition {
+	if def.XSide != "agent" || (def.XMethod != "session/new" && def.XMethod != "session/resume") {
+		return nil
+	}
+	prop := def.Properties["availableCommands"]
+	if prop == nil || ir.PrimaryType(prop) != "array" || prop.Items == nil ||
+		!prop.DeserializeDefaultOnError || !prop.DeserializeSkipInvalidItems ||
+		slices.Contains(def.Required, "availableCommands") {
+		return nil
+	}
+	return prop
+}
+
+func emitInitialCommandsDecode(g *Group, prop *load.Definition) {
+	// Shadow the typed field so malformed commands cannot fail alias decoding.
+	g.Var().Id("raw").Struct(
+		Id("Alias"),
+		Id("AvailableCommands").Qual("encoding/json", "RawMessage").Tag(map[string]string{"json": "availableCommands"}),
+	)
+	g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("raw")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+	g.Id("a").Op("=").Id("raw").Dot("Alias")
+	g.Var().Id("items").Index().Qual("encoding/json", "RawMessage")
+	g.If(Qual("encoding/json", "Unmarshal").Call(Id("raw").Dot("AvailableCommands"), Op("&").Id("items")).Op("==").Nil()).BlockFunc(func(h *Group) {
+		h.For(List(Id("_"), Id("item")).Op(":=").Range().Id("items")).BlockFunc(func(loop *Group) {
+			loop.Var().Id("command").Add(jenTypeFor(prop.Items))
+			loop.If(Qual("encoding/json", "Unmarshal").Call(Id("item"), Op("&").Id("command")).Op("==").Nil()).Block(
+				Id("a").Dot("AvailableCommands").Op("=").Append(Id("a").Dot("AvailableCommands"), Id("command")),
+			)
+		})
+	})
+}
+
 func nullablePresenceProperties(properties map[string]*load.Definition, required map[string]struct{}) []nullablePresenceProp {
 	keys := make([]string, 0, len(properties))
 	for key := range properties {
@@ -513,7 +548,8 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 
 			// UnmarshalJSON enforces required-property presence and applies defaults
 			// when a field is missing or null (and the schema doesn't include null).
-			if len(def.Required) > 0 || len(defaults) > 0 || len(nullablePresence) > 0 {
+			initialCommands := initialCommandsProperty(def)
+			if len(def.Required) > 0 || len(defaults) > 0 || len(nullablePresence) > 0 || initialCommands != nil {
 				f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
 					g.Op("*").Id("v").Op("=").Id(name).Values()
 					g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
@@ -521,7 +557,11 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 					emitRequiredPresenceChecks(g, schema, def)
 					g.Type().Id("Alias").Id(name)
 					g.Var().Id("a").Id("Alias")
-					g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+					if initialCommands != nil {
+						emitInitialCommandsDecode(g, initialCommands)
+					} else {
+						g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+					}
 					for _, dp := range defaults {
 						g.BlockFunc(func(h *Group) {
 							h.List(Id("_rm"), Id("_ok")).Op(":=").Id("m").Index(Lit(dp.propName))
