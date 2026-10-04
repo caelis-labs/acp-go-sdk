@@ -210,3 +210,20 @@ func TestNullablePresencePropertiesRequireExplicitClearSemantics(t *testing.T) {
 		t.Fatalf("nullable presence properties = %#v", got)
 	}
 }
+
+func TestInitialCommandsRecoveryScope(t *testing.T) {
+	for _, method := range []string{"session/new", "session/resume", "session/update"} {
+		for _, enabled := range []bool{false, true} {
+			prop := &load.Definition{Type: "array", Items: &load.Definition{Ref: "#/$defs/AvailableCommand"}, DeserializeDefaultOnError: enabled, DeserializeSkipInvalidItems: true}
+			definition := &load.Definition{XSide: "agent", XMethod: method, Properties: map[string]*load.Definition{"availableCommands": prop, "configOptions": prop}}
+			want := enabled && method != "session/update"
+			if got := initialCommandsProperty(definition); (got != nil) != want {
+				t.Fatalf("%s markers=%v: recovery = %v, want %v", method, enabled, got != nil, want)
+			}
+			definition.Required = []string{"availableCommands"}
+			if initialCommandsProperty(definition) != nil {
+				t.Fatal("required field recovery enabled")
+			}
+		}
+	}
+}
