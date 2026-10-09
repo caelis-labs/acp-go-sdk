@@ -13,7 +13,7 @@
   },
   "rustSdk": {
     "repository": "https://github.com/agentclientprotocol/rust-sdk",
-    "tag": "v3.1.0",
-    "commit": "3f042ac1d8f7bc6e493098f255e55f8d25942d45"
+    "tag": "v3.2.0",
+    "commit": "5c41d62297eb74cce06daac8b3a487c6c453d552"
   }
 }
