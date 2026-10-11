@@ -1954,16 +1954,16 @@ func (v *CompactionUpdate) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		_, present := m["_meta"]
-		a.hasMeta = present
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["error"]
-		a.hasError = present
+		raw, present := m["error"]
+		a.hasError = present && (a.Error != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["summary"]
-		a.hasSummary = present
+		raw, present := m["summary"]
+		a.hasSummary = present && (a.Summary != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = CompactionUpdate(a)
 	return nil
@@ -10424,16 +10424,16 @@ func (v *SessionCompactionUpdate) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		_, present := m["_meta"]
-		a.hasMeta = present
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["error"]
-		a.hasError = present
+		raw, present := m["error"]
+		a.hasError = present && (a.Error != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["summary"]
-		a.hasSummary = present
+		raw, present := m["summary"]
+		a.hasSummary = present && (a.Summary != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = SessionCompactionUpdate(a)
 	return nil

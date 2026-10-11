@@ -40,8 +40,9 @@ three states for `summary`, `error`, and `_meta`:
 Inspect decoded values with `SummaryState`, `ErrorState`, and `MetaState`.
 `SetSummary([]acp.ContentBlock{})` sends an empty array, clearing the retained
 summary without losing the concrete-value state. `_meta` retains raw JSON
-numbers. Malformed optional display fields recover to their empty/null state;
-invalid summary entries are skipped, preserving valid entries in order.
+numbers. Malformed optional compaction patches recover to omitted, leaving
+the stored value unchanged; only a genuine JSON `null` clears it. Invalid
+summary entries are skipped, preserving valid entries in order.
 Required fields and malformed known content variants still fail validation.
 
 ## Action input validation
@@ -67,7 +68,15 @@ with known, future, and absent stop-reason variants. The old experimental
 `StopReason` type/constants are removed by the new schema; pass a string such as
 `"end_turn"` to `IdleUpdate`, or use `IdleErrorUpdate` to include JSON-RPC failure
 details after prompt insertion. Earlier prompt failures remain error responses.
-Unknown v2 MCP transports retain their raw `Other` variant.
+`SessionStateUpdate.StateUpdate` retains the nested `StateUpdate` union, and
+`StateUpdateIdle.IdleStateUpdate` retains the stop-reason union. Inspect their
+selected variant (for example, `.Idle.IdleStateUpdate.Error.Error` for failure
+details), rather than flattened `State` / `StopReason` / `Error` fields.
+This preserves custom and future state/stop-reason payloads through actual
+`session/update` notifications, including extension fields and raw JSON numbers.
+The `RunningUpdate`, `IdleUpdate`, `IdleErrorUpdate`, and `RequiresActionUpdate`
+helpers construct these nested variants. Unknown v2 MCP transports retain their
+raw `Other` variant.
 
 The TypeScript 1.8.0 / Rust 3.3.0 four-direction matrix covers stable ACP v1,
 including capability negotiation, notices, ordered compaction updates/chunks,

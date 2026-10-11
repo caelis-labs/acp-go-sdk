@@ -1902,16 +1902,16 @@ func (v *CompactionUpdate) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		_, present := m["_meta"]
-		a.hasMeta = present
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["error"]
-		a.hasError = present
+		raw, present := m["error"]
+		a.hasError = present && (a.Error != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["summary"]
-		a.hasSummary = present
+		raw, present := m["summary"]
+		a.hasSummary = present && (a.Summary != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = CompactionUpdate(a)
 	return nil
@@ -11111,30 +11111,31 @@ type SessionUpdateAgentThought struct {
 
 // The state of the agent's foreground work has changed.
 type SessionStateUpdate struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// The failure, as a JSON-RPC error object.
-	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting failure details.
-	// Agents SHOULD include it.
-	Error         *Error `json:"error,omitempty"`
-	SessionUpdate string `json:"sessionUpdate"`
-	// Custom or future session state.
-	//
-	// Values beginning with '_' are reserved for implementation-specific
-	// extensions. Unknown values that do not begin with '_' are reserved for
-	// future ACP variants.
-	State *string `json:"state,omitempty"`
-	// Why foreground work stopped. The value selects one of this type's variants, which may add fields of their own.
-	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason; a malformed value is treated the same way.
-	//
-	// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#stop-reasons)
-	StopReason *string `json:"stopReason,omitempty"`
+	StateUpdate   StateUpdate `json:"-"`
+	SessionUpdate string      `json:"sessionUpdate"`
+}
+
+func (v SessionStateUpdate) MarshalJSON() ([]byte, error) {
+	encoded, err := json.Marshal(v.StateUpdate)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, errors.New("nested union must be an object")
+	}
+	type Alias SessionStateUpdate
+	fields, err := json.Marshal(Alias(v))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(fields, &m); err != nil {
+		return nil, err
+	}
+	return json.Marshal(m)
 }
 
 func (v *SessionStateUpdate) UnmarshalJSON(b []byte) error {
@@ -11154,26 +11155,11 @@ func (v *SessionStateUpdate) UnmarshalJSON(b []byte) error {
 	}
 	type Alias SessionStateUpdate
 	var a Alias
-	var raw struct {
-		Alias
-		StopReason json.RawMessage `json:"stopReason"`
-		Error      json.RawMessage `json:"error"`
-	}
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := json.Unmarshal(b, &a); err != nil {
 		return err
 	}
-	a = raw.Alias
-	{
-		var value *string
-		if json.Unmarshal(raw.StopReason, &value) == nil {
-			a.StopReason = value
-		}
-	}
-	{
-		var value *Error
-		if json.Unmarshal(raw.Error, &value) == nil {
-			a.Error = value
-		}
+	if err := json.Unmarshal(b, &a.StateUpdate); err != nil {
+		return err
 	}
 	*v = SessionStateUpdate(a)
 	return nil
@@ -11764,16 +11750,16 @@ func (v *SessionCompactionUpdate) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		_, present := m["_meta"]
-		a.hasMeta = present
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["error"]
-		a.hasError = present
+		raw, present := m["error"]
+		a.hasError = present && (a.Error != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
-		_, present := m["summary"]
-		a.hasSummary = present
+		raw, present := m["summary"]
+		a.hasSummary = present && (a.Summary != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = SessionCompactionUpdate(a)
 	return nil
@@ -13556,24 +13542,31 @@ type StateUpdateRunning struct {
 
 // The agent is ready to process a new prompt.
 type StateUpdateIdle struct {
-	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys.
-	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// The failure, as a JSON-RPC error object.
-	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting failure details.
-	// Agents SHOULD include it.
-	Error *Error `json:"error,omitempty"`
-	State string `json:"state"`
-	// Why foreground work stopped. The value selects one of this type's variants, which may add fields of their own.
-	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason; a malformed value is treated the same way.
-	//
-	// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#stop-reasons)
-	StopReason *string `json:"stopReason,omitempty"`
+	IdleStateUpdate IdleStateUpdate `json:"-"`
+	State           string          `json:"state"`
+}
+
+func (v StateUpdateIdle) MarshalJSON() ([]byte, error) {
+	encoded, err := json.Marshal(v.IdleStateUpdate)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, errors.New("nested union must be an object")
+	}
+	type Alias StateUpdateIdle
+	fields, err := json.Marshal(Alias(v))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(fields, &m); err != nil {
+		return nil, err
+	}
+	return json.Marshal(m)
 }
 
 func (v *StateUpdateIdle) UnmarshalJSON(b []byte) error {
@@ -13593,26 +13586,11 @@ func (v *StateUpdateIdle) UnmarshalJSON(b []byte) error {
 	}
 	type Alias StateUpdateIdle
 	var a Alias
-	var raw struct {
-		Alias
-		StopReason json.RawMessage `json:"stopReason"`
-		Error      json.RawMessage `json:"error"`
-	}
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := json.Unmarshal(b, &a); err != nil {
 		return err
 	}
-	a = raw.Alias
-	{
-		var value *string
-		if json.Unmarshal(raw.StopReason, &value) == nil {
-			a.StopReason = value
-		}
-	}
-	{
-		var value *Error
-		if json.Unmarshal(raw.Error, &value) == nil {
-			a.Error = value
-		}
+	if err := json.Unmarshal(b, &a.IdleStateUpdate); err != nil {
+		return err
 	}
 	*v = StateUpdateIdle(a)
 	return nil

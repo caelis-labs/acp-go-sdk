@@ -250,3 +250,33 @@ func TestNestedUnionAlternativeProperties(t *testing.T) {
 		t.Fatal("nested failure details lost")
 	}
 }
+
+func TestEmitUnionComposesNestedOpenUnion(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		schema := &load.Schema{Defs: map[string]*load.Definition{
+			"Inner": {AnyOf: []*load.Definition{{
+				Title: "other", Type: "object", AdditionalProperties: open,
+				Properties: map[string]*load.Definition{"reason": {Type: "string"}}, Required: []string{"reason"},
+			}}},
+		}}
+		variant := &load.Definition{
+			Type: "object", Properties: map[string]*load.Definition{"kind": {Type: "string", Const: "nested"}},
+			Required: []string{"kind"}, AllOf: []*load.Definition{{Ref: "#/$defs/Inner"}},
+		}
+		file := NewFile("acp")
+		emitUnion(file, "Outer", schema, &load.Definition{}, []*load.Definition{variant}, false, map[string]bool{"Outer": true, "Inner": true})
+		var output bytes.Buffer
+		if err := file.Render(&output); err != nil {
+			t.Fatal(err)
+		}
+		generated := output.String()
+		for _, fragment := range []string{"Inner Inner", "json.Marshal(v.Inner)", "json.Unmarshal(b, &a.Inner)"} {
+			if strings.Contains(generated, fragment) != open {
+				t.Fatalf("open=%v: nested composition %q:\n%s", open, fragment, generated)
+			}
+		}
+		if open && strings.Contains(generated, "Reason *string") {
+			t.Fatalf("nested union was flattened:\n%s", generated)
+		}
+	}
+}

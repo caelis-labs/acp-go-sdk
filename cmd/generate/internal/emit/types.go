@@ -23,6 +23,7 @@ type nullablePresenceProp struct {
 	presentName string
 	definition  *load.Definition
 	indirect    bool
+	recoverable bool
 }
 
 // initialCommandsProperty deliberately limits recovery to the newly released
@@ -68,6 +69,7 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 	sort.Strings(keys)
 
 	var result []nullablePresenceProp
+	recovery := displayRecoveryProperties(&load.Definition{Properties: properties})
 	for _, propertyName := range keys {
 		definition := properties[propertyName]
 		if _, ok := required[propertyName]; ok || !includesNull(definition) {
@@ -86,6 +88,7 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 			presentName: "has" + fieldName,
 			definition:  definition,
 			indirect:    propertyName != "_meta" && ir.PrimaryType(definition) != "array" && ir.PrimaryType(definition) != "object",
+			recoverable: slices.Contains(recovery, propertyName),
 		})
 	}
 	return result
@@ -128,8 +131,18 @@ func emitNullablePresenceMarshalBody(g *Group, properties []nullablePresenceProp
 func emitNullablePresenceUnmarshalAssignments(g *Group, properties []nullablePresenceProp) {
 	for _, property := range properties {
 		g.BlockFunc(func(h *Group) {
-			h.List(Id("_"), Id("present")).Op(":=").Id("m").Index(Lit(property.propName))
-			h.Id("a").Dot(property.presentName).Op("=").Id("present")
+			if property.recoverable {
+				// Recovery to nil means omitted, except when the wire value was
+				// genuinely null. A malformed optional patch must never clear
+				// the client's retained value.
+				h.List(Id("raw"), Id("present")).Op(":=").Id("m").Index(Lit(property.propName))
+				h.Id("a").Dot(property.presentName).Op("=").Id("present").Op("&&").Parens(
+					Id("a").Dot(property.fieldName).Op("!=").Nil().Op("||").Qual("bytes", "Equal").Call(Qual("bytes", "TrimSpace").Call(Id("raw")), Index().Byte().Parens(Lit("null"))),
+				)
+			} else {
+				h.List(Id("_"), Id("present")).Op(":=").Id("m").Index(Lit(property.propName))
+				h.Id("a").Dot(property.presentName).Op("=").Id("present")
+			}
 		})
 	}
 }
@@ -1377,6 +1390,58 @@ func unionAlternativeProperties(schema *load.Schema, def *load.Definition) map[s
 	return properties
 }
 
+// Keep referenced open unions as unions when composing them with an outer
+// object's properties. Flattening their known fields loses the raw Other
+// variants, including extension fields of nested discriminated unions.
+// Closed unions retain the established flattened API.
+func nestedOpenUnionReference(schema *load.Schema, def *load.Definition) string {
+	if len(def.AllOf) != 1 || def.AllOf[0] == nil || !strings.HasPrefix(def.AllOf[0].Ref, "#/$defs/") {
+		return ""
+	}
+	name := strings.TrimPrefix(def.AllOf[0].Ref, "#/$defs/")
+	referenced := schema.Defs[name]
+	if referenced == nil {
+		return ""
+	}
+	for _, variant := range append(append([]*load.Definition(nil), referenced.AnyOf...), referenced.OneOf...) {
+		if preservesRawPayload(expandAllOf(schema, variant)) {
+			return name
+		}
+	}
+	return ""
+}
+
+func emitNestedUnionJSON(f *File, name, nested string, schema *load.Schema, def *load.Definition) {
+	f.Func().Params(Id("v").Id(name)).Id("MarshalJSON").Params().Params(Index().Byte(), Error()).BlockFunc(func(g *Group) {
+		g.List(Id("encoded"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(Id("v").Dot(nested))
+		g.If(Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+		g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("encoded"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+		g.If(Id("m").Op("==").Nil()).Block(Return(Nil(), Qual("errors", "New").Call(Lit("nested union must be an object"))))
+		g.Type().Id("Alias").Id(name)
+		g.List(Id("fields"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(Id("Alias").Call(Id("v")))
+		g.If(Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+		// Decode directly into the existing map to overlay outer fields without
+		// coercing raw extension numbers or shadowing the nested union methods.
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("fields"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+		g.Return(Qual("encoding/json", "Marshal").Call(Id("m")))
+	})
+	f.Line()
+	f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
+		g.Op("*").Id("v").Op("=").Id(name).Values()
+		g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		emitRequiredPresenceChecks(g, schema, def)
+		g.Type().Id("Alias").Id(name)
+		g.Var().Id("a").Id("Alias")
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a").Dot(nested)), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		g.Op("*").Id("v").Op("=").Id(name).Call(Id("a"))
+		g.Return(Nil())
+	})
+	f.Line()
+}
+
 // emitAvailableCommandInputJen generates a concrete variant type for anyOf and a thin union wrapper
 // that supports JSON unmarshal by probing object shape. Currently the schema defines one variant
 // (title: UnstructuredCommandInput) with a required 'hint' field.
@@ -1439,6 +1504,8 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			continue
 		}
 		ref := v.Ref
+		nestedUnion := nestedOpenUnionReference(schema, v)
+		outerDefinition := *v
 		// If this is an allOf wrapper around a single $ref with no additional structure, treat it
 		// as a $ref variant (keeps types stable and avoids duplicate structs).
 		if ref == "" &&
@@ -1609,6 +1676,16 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					req[r] = struct{}{}
 				}
 				mergedProps := variantProperties
+				if nestedUnion != "" {
+					mergedProps = make(map[string]*load.Definition, len(sharedProps)+len(outerDefinition.Properties))
+					for key, property := range sharedProps {
+						mergedProps[key] = property
+					}
+					for key, property := range outerDefinition.Properties {
+						mergedProps[key] = property
+					}
+					st = append(st, Id(nestedUnion).Id(nestedUnion).Tag(map[string]string{"json": "-"}))
+				}
 				pkeys := make([]string, 0, len(mergedProps))
 				for pk := range mergedProps {
 					pkeys = append(pkeys, pk)
@@ -1629,7 +1706,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 						tag = pk + ",omitempty"
 					}
 					fieldType := jenTypeForProperty(pk, pDef)
-					if _, fromAlternative := alternativeProps[pk]; fromAlternative && !includesNull(pDef) {
+					if _, fromAlternative := alternativeProps[pk]; nestedUnion == "" && fromAlternative && !includesNull(pDef) {
 						fieldType = Op("*").Add(jenTypeFor(pDef))
 					}
 					st = append(st, Id(field).Add(fieldType).Tag(map[string]string{"json": tag}))
@@ -1673,7 +1750,21 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			}
 			f.Type().Id(tname).Struct(st...)
 			f.Line()
-			if nullableDefinition != nil {
+			if nestedUnion != "" {
+				outerDefinition.Properties = make(map[string]*load.Definition, len(sharedProps)+len(outerDefinition.Properties))
+				for key, property := range sharedProps {
+					outerDefinition.Properties[key] = property
+				}
+				for key, property := range defs[idx].Properties {
+					outerDefinition.Properties[key] = property
+				}
+				for key := range sharedRequired {
+					if !slices.Contains(outerDefinition.Required, key) {
+						outerDefinition.Required = append(append([]string(nil), outerDefinition.Required...), key)
+					}
+				}
+				emitNestedUnionJSON(f, tname, nestedUnion, schema, &outerDefinition)
+			} else if nullableDefinition != nil {
 				emitNullablePresenceJSON(f, tname, schema, nullableDefinition, variantNullable)
 			} else {
 				definition := *v

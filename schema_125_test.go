@@ -19,7 +19,8 @@ func TestCompactionPatchStatesAndRecovery(t *testing.T) {
 		{`,"summary":null,"error":null,"_meta":null`, NullableFieldNull, 0},
 		{`,"summary":[],"error":"","_meta":{}`, NullableFieldValue, 0},
 		{`,"summary":[{"type":"text","text":"kept"},null,{"type":"text"}],"error":"failed","_meta":{"n":9007199254740993}`, NullableFieldValue, 1},
-		{`,"summary":false,"error":123,"_meta":[]`, NullableFieldNull, 0},
+		{`,"summary":false,"error":42,"_meta":"invalid"`, NullableFieldAbsent, 0},
+		{`,"summary":false,"error":123,"_meta":[]`, NullableFieldAbsent, 0},
 	} {
 		t.Run(tc.fields, func(t *testing.T) {
 			input := `{"compactionId":"c1","status":"_future"` + tc.fields + `}`
@@ -272,5 +273,71 @@ func TestStrictTerminalDispatchRejectsBeforeHandler(t *testing.T) {
 	}
 	if impl.calls != 1 {
 		t.Fatal("valid null collections did not reach handler")
+	}
+}
+
+func TestCompactionRecoveryNotification(t *testing.T) {
+	a, b := net.Pipe()
+	receiver := &schema125Client{updates: make(chan SessionUpdate, 1)}
+	client, err := NewClientSideConnectionWithOptions(receiver, b, b, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	peer := NewConnection(nil, a, a)
+	defer func() { _ = peer.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, tc := range []struct {
+		fields string
+		states [3]NullableFieldState
+	}{
+		{`"summary":[{"type":"text","text":"retained"}],"error":"retained","_meta":{"n":9007199254740993}`, [3]NullableFieldState{NullableFieldValue, NullableFieldValue, NullableFieldValue}},
+		{`"summary":false,"error":42,"_meta":"invalid"`, [3]NullableFieldState{NullableFieldAbsent, NullableFieldAbsent, NullableFieldAbsent}},
+		{`"summary":false,"error":null,"_meta":{}`, [3]NullableFieldState{NullableFieldAbsent, NullableFieldNull, NullableFieldValue}},
+		{`"summary":null,"error":null,"_meta":null`, [3]NullableFieldState{NullableFieldNull, NullableFieldNull, NullableFieldNull}},
+	} {
+		wire := json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"compaction_update","compactionId":"c","status":"failed",` + tc.fields + `}}`)
+		if err := peer.SendNotification(ctx, ClientMethodSessionUpdate, wire); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case got := <-receiver.updates:
+			patch := got.CompactionUpdate
+			if patch == nil {
+				t.Fatal("compaction update not dispatched")
+			}
+			states := [3]NullableFieldState{patch.SummaryState(), patch.ErrorState(), patch.MetaState()}
+			if states != tc.states {
+				t.Fatalf("patch states=%v want=%v; input=%s", states, tc.states, wire)
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatal(err)
+			}
+			for i, key := range []string{"summary", "error", "_meta"} {
+				raw, present := fields[key]
+				switch tc.states[i] {
+				case NullableFieldAbsent:
+					if present {
+						t.Fatalf("malformed %s became a patch: %s", key, encoded)
+					}
+				case NullableFieldNull:
+					if string(raw) != "null" {
+						t.Fatalf("explicit clear lost for %s: %s", key, encoded)
+					}
+				case NullableFieldValue:
+					if !present || string(raw) == "null" {
+						t.Fatalf("replacement lost for %s: %s", key, encoded)
+					}
+				}
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 	}
 }
