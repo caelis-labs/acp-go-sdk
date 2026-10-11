@@ -227,3 +227,67 @@ func TestInitialCommandsRecoveryScope(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionPatchPresenceIncludesCollections(t *testing.T) {
+	properties := map[string]*load.Definition{
+		"compactionId": {Type: "string"}, "status": {Type: "string"},
+		"summary": {Type: []any{"array", "null"}, Items: &load.Definition{Ref: "#/$defs/ContentBlock"}},
+		"error":   {Type: []any{"string", "null"}},
+		"_meta":   {Type: []any{"object", "null"}, AdditionalProperties: true},
+	}
+	got := nullablePresenceProperties(properties, nil)
+	if len(got) != 3 || got[0].propName != "_meta" || got[0].indirect || got[1].propName != "error" || !got[1].indirect || got[2].propName != "summary" || got[2].indirect {
+		t.Fatalf("patch properties=%+v", got)
+	}
+}
+
+func TestNestedUnionAlternativeProperties(t *testing.T) {
+	schema := &load.Schema{Defs: map[string]*load.Definition{
+		"Failure": {Type: "object", Properties: map[string]*load.Definition{"error": {Ref: "#/$defs/Error"}}},
+	}}
+	definition := &load.Definition{AnyOf: []*load.Definition{{AnyOf: []*load.Definition{{AllOf: []*load.Definition{{Ref: "#/$defs/Failure"}}}}}}}
+	if unionAlternativeProperties(schema, definition)["error"] == nil {
+		t.Fatal("nested failure details lost")
+	}
+}
+
+func TestUnionRequiredAlternativesRetainsOptionalBranch(t *testing.T) {
+	definition := &load.Definition{AnyOf: []*load.Definition{
+		{Required: []string{"stopReason"}},
+		{Title: "none", Type: "object", Properties: map[string]*load.Definition{"stopReason": {Type: "null"}}},
+	}}
+	got := unionRequiredAlternatives(&load.Schema{}, definition)
+	if len(got) != 2 || len(got[0]) != 1 || got[0][0] != "stopReason" || len(got[1]) != 0 {
+		t.Fatalf("optional anyOf alternative was dropped: %#v", got)
+	}
+}
+
+func TestEmitUnionComposesNestedOpenUnion(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		schema := &load.Schema{Defs: map[string]*load.Definition{
+			"Inner": {AnyOf: []*load.Definition{{
+				Title: "other", Type: "object", AdditionalProperties: open,
+				Properties: map[string]*load.Definition{"reason": {Type: "string"}}, Required: []string{"reason"},
+			}}},
+		}}
+		variant := &load.Definition{
+			Type: "object", Properties: map[string]*load.Definition{"kind": {Type: "string", Const: "nested"}},
+			Required: []string{"kind"}, AllOf: []*load.Definition{{Ref: "#/$defs/Inner"}},
+		}
+		file := NewFile("acp")
+		emitUnion(file, "Outer", schema, &load.Definition{}, []*load.Definition{variant}, false, map[string]bool{"Outer": true, "Inner": true})
+		var output bytes.Buffer
+		if err := file.Render(&output); err != nil {
+			t.Fatal(err)
+		}
+		generated := output.String()
+		for _, fragment := range []string{"Inner Inner", "json.Marshal(v.Inner)", "json.Unmarshal(b, &a.Inner)"} {
+			if strings.Contains(generated, fragment) != open {
+				t.Fatalf("open=%v: nested composition %q:\n%s", open, fragment, generated)
+			}
+		}
+		if open && strings.Contains(generated, "Reason *string") {
+			t.Fatalf("nested union was flattened:\n%s", generated)
+		}
+	}
+}

@@ -14,7 +14,10 @@ The core matrix runs both roles in both languages:
 - official Rust client to Go agent.
 
 Each direction covers the deterministic `core`, `session-cancel`, and
-`request-cancel` scenarios. `session-cancel` proves prompt-turn cancellation.
+`request-cancel` scenarios. The core scenario advertises notice and compaction
+capabilities and checks typed notices, ordered compaction upserts/summary chunks,
+empty summary replacement, and explicit error/metadata clears alongside the
+conversation and reverse permission request. `session-cancel` proves prompt-turn cancellation.
 `request-cancel` separately proves `$/cancel_request` and JSON-RPC `-32800`.
 
 External SDK identities are recorded in `versions.json` and mirrored by

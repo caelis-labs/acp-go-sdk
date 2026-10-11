@@ -161,18 +161,18 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "1.7.0" ||
-		locked.TypeScript.Tag != "v1.7.0" ||
-		locked.TypeScript.Commit != "605f3e0a250d1f0444b13b7c2a3b3d21b5c4b5ca" ||
-		locked.TypeScript.Integrity != "sha512-ZORuxsuEnLjRly7t6Ad7zAsWitjWsyprswyPUHz/yycPb+tTm3DGa8XheaHhRXqX8LS9snuxaYavXSRA50TlHw==" {
+		locked.TypeScript.Version != "1.8.0" ||
+		locked.TypeScript.Tag != "v1.8.0" ||
+		locked.TypeScript.Commit != "f4ea219505fcafcb3fa63e00f1c24559755c4b6b" ||
+		locked.TypeScript.Integrity != "sha512-fbP7qHZsFyTJVT0/RPrcWJ8An26qLXHEuGCHHEKDyxD1xpXV+Ejyh2LAE6vBAFePkpVjZeeohnbgvuEhZ7wLMg==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "3.2.0" ||
-		locked.Rust.Tag != "v3.2.0" ||
-		locked.Rust.Commit != "5c41d62297eb74cce06daac8b3a487c6c453d552" ||
-		locked.Rust.Checksum != "e0d09e5bd7214b0aa5f0fd3f2eefae4a8c0069fd6a4c1ae4e733d3691e36ec19" ||
+		locked.Rust.Version != "3.3.0" ||
+		locked.Rust.Tag != "v3.3.0" ||
+		locked.Rust.Commit != "199532c7433f1aec207dd0cada299901a5621ece" ||
+		locked.Rust.Checksum != "02898d848a20eb09b8a392e85bb3a4c79dba01d369758185d102b001362a60da" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}
@@ -275,7 +275,8 @@ func runGoClientScenario(t *testing.T, peer peerSpec, scenario string) {
 	defer func() { _ = process.Close() }()
 
 	initialized, err := process.Connection.Initialize(processContext, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
+		ProtocolVersion:    acp.ProtocolVersion(acp.WireProtocolVersion),
+		ClientCapabilities: acp.ClientCapabilities{Session: &acp.ClientSessionCapabilities{Compaction: &acp.CompactionCapabilities{}, Notices: &acp.NoticeCapabilities{}}},
 		ClientInfo: &acp.Implementation{
 			Name:    "go-interop-client",
 			Version: "0.0.0",
@@ -455,6 +456,23 @@ func (c *recordingClient) RequestPermission(_ context.Context, request acp.Reque
 }
 
 func (c *recordingClient) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+	update := notification.Update
+	if update.Notice != nil {
+		c.append("notice:" + string(update.Notice.Severity) + ":" + update.Notice.Title)
+	}
+	if update.CompactionSummaryChunk != nil && update.CompactionSummaryChunk.Content.Text != nil {
+		c.append("summary:" + string(update.CompactionSummaryChunk.CompactionId) + ":" + update.CompactionSummaryChunk.Content.Text.Text)
+	}
+	if patch := update.CompactionUpdate; patch != nil {
+		state := "invalid"
+		if patch.Status == acp.CompactionStatusInProgress && patch.SummaryState() == acp.NullableFieldAbsent && patch.ErrorState() == acp.NullableFieldAbsent && patch.MetaState() == acp.NullableFieldAbsent {
+			state = "absent"
+		}
+		if patch.Status == acp.CompactionStatusCompleted && patch.SummaryState() == acp.NullableFieldValue && len(patch.Summary) == 0 && patch.ErrorState() == acp.NullableFieldNull && patch.MetaState() == acp.NullableFieldNull {
+			state = "cleared"
+		}
+		c.append("compaction:" + string(patch.CompactionId) + ":" + string(patch.Status) + ":" + state)
+	}
 	if notification.Update.AgentMessageChunk != nil && notification.Update.AgentMessageChunk.Content.Text != nil {
 		c.append("update:" + notification.Update.AgentMessageChunk.Content.Text.Text)
 	}
@@ -540,7 +558,7 @@ func assertScenarioEvents(t *testing.T, scenario string, got []string) {
 			}
 			positions[event] = index
 		}
-		wantEvents := []string{"update:core-1", "update:core-2", "permission:allow", "update:core-3", "response:end_turn"}
+		wantEvents := []string{"update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3", "response:end_turn"}
 		if len(got) != len(wantEvents) {
 			t.Fatalf("core events = %v, want exactly %v", got, wantEvents)
 		}
@@ -553,6 +571,10 @@ func assertScenarioEvents(t *testing.T, scenario string, got []string) {
 			positions["update:core-2"] < positions["update:core-3"] &&
 			positions["permission:allow"] < positions["update:core-3"] &&
 			positions["update:core-3"] < positions["response:end_turn"]
+		display := []string{"update:core-2", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3"}
+		for i := 1; i < len(display); i++ {
+			ordered = ordered && positions[display[i-1]] < positions[display[i]]
+		}
 		if !ordered {
 			t.Fatalf("core event ordering = %v", got)
 		}

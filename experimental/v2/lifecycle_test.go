@@ -62,7 +62,7 @@ func (a *loopbackAgent) Prompt(ctx context.Context, params PromptRequest) (Promp
 		}
 		return a.conn.SessionUpdate(ctx, UpdateSessionNotification{
 			SessionId: params.SessionId,
-			Update:    IdleUpdate(StopReasonEndTurn),
+			Update:    IdleUpdate("end_turn"),
 		})
 	}); err != nil {
 		return PromptResponse{}, err
@@ -162,14 +162,14 @@ func testV2PromptInsertion(t *testing.T, echoBefore bool) {
 	if message == nil || message.MessageId != ack.MessageId || len(message.Content) != 1 || message.Content[0].Text == nil || message.Content[0].Text.Text != "hello" {
 		t.Fatalf("user message = %#v, want echoed prompt with message ID %q", message, ack.MessageId)
 	}
-	if clientImpl.updates[1].StateUpdate == nil || *clientImpl.updates[1].StateUpdate.State != "running" {
+	if clientImpl.updates[1].StateUpdate == nil || clientImpl.updates[1].StateUpdate.StateUpdate.Running == nil {
 		t.Fatalf("second update = %#v", clientImpl.updates[1].StateUpdate)
 	}
-	if clientImpl.updates[2].StateUpdate == nil || *clientImpl.updates[2].StateUpdate.State != "idle" {
+	if clientImpl.updates[2].StateUpdate == nil || clientImpl.updates[2].StateUpdate.StateUpdate.Idle == nil {
 		t.Fatalf("third update = %#v", clientImpl.updates[2].StateUpdate)
 	}
-	if clientImpl.updates[2].StateUpdate.StopReason == nil || *clientImpl.updates[2].StateUpdate.StopReason != StopReasonEndTurn {
-		t.Fatalf("idle stopReason = %#v", clientImpl.updates[2].StateUpdate.StopReason)
+	if clientImpl.updates[2].StateUpdate.StateUpdate.Idle.IdleStateUpdate.EndTurn == nil {
+		t.Fatalf("idle stopReason = %#v", clientImpl.updates[2].StateUpdate.StateUpdate.Idle.IdleStateUpdate)
 	}
 }
 
@@ -233,7 +233,7 @@ func TestStateUpdateJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(raw, &note); err != nil {
 		t.Fatal(err)
 	}
-	if note.Update.StateUpdate == nil || *note.Update.StateUpdate.State != "idle" {
+	if note.Update.StateUpdate == nil || note.Update.StateUpdate.StateUpdate.Idle == nil {
 		t.Fatalf("decoded %#v", note.Update.StateUpdate)
 	}
 	encoded, err := json.Marshal(note)
@@ -244,7 +244,7 @@ func TestStateUpdateJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(encoded, &again); err != nil {
 		t.Fatal(err)
 	}
-	if again.Update.StateUpdate == nil || *again.Update.StateUpdate.StopReason != StopReasonEndTurn {
+	if again.Update.StateUpdate == nil || again.Update.StateUpdate.StateUpdate.Idle == nil || again.Update.StateUpdate.StateUpdate.Idle.IdleStateUpdate.EndTurn == nil {
 		t.Fatalf("round-trip %#v", again.Update.StateUpdate)
 	}
 }
