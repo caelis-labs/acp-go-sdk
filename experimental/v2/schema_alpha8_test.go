@@ -1,9 +1,11 @@
 package v2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
+	"reflect"
 	"testing"
 	"time"
 
@@ -62,11 +64,28 @@ func TestAlpha8NestedStateNotificationPreservesUnknownPayload(t *testing.T) {
 	defer func() { _ = peer.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, fields := range []string{
-		`"state":"idle","stopReason":"_paused","resumeAfter":30`,
-		`"state":"idle","stopReason":"future_reason","resumeAfter":30,"error":42,"payload":{"n":9007199254740993}`,
-		`"state":"_future_state","pending":{"n":9007199254740993}`,
+	for _, tc := range []struct {
+		fields string
+		none   bool
+	}{
+		{`"state":"idle"`, true},
+		{`"state":"idle","stopReason":null`, true},
+		{`"state":"idle","stopReason":123`, true},
+		{`"state":"idle","stopReason":[]`, true},
+		{`"state":"idle","stopReason":{}`, true},
+		{`"state":"idle","stopReason":true`, true},
+		{`"state":"idle","stopReason":"end_turn","_meta":{"n":9007199254740993}`, false},
+		{`"state":"idle","stopReason":"max_tokens"`, false},
+		{`"state":"idle","stopReason":"max_turn_requests"`, false},
+		{`"state":"idle","stopReason":"refusal"`, false},
+		{`"state":"idle","stopReason":"cancelled"`, false},
+		{`"state":"idle","stopReason":"error","error":{"code":-32603,"message":"Failed","data":{"detail":"retry"}}`, false},
+		{`"state":"idle","stopReason":"_paused","resumeAfter":30`, false},
+		{`"state":"idle","stopReason":"future_reason","resumeAfter":30,"error":42,"payload":{"n":9007199254740993}`, false},
+		{`"state":"idle","stopReason":""`, false},
+		{`"state":"_future_state","pending":{"n":9007199254740993}`, false},
 	} {
+		fields := tc.fields
 		wire := []byte(`{"sessionUpdate":"state_update",` + fields + `}`)
 		// Exercise both nested standalone unions and the actual session/update
 		// notification path, where flattening previously discarded extensions.
@@ -74,7 +93,14 @@ func TestAlpha8NestedStateNotificationPreservesUnknownPayload(t *testing.T) {
 		if err := json.Unmarshal(wire, &state); err != nil {
 			t.Fatal(err)
 		}
-		assertAlpha8RawFields(t, state, fields)
+		wantFields := fields
+		if tc.none {
+			wantFields = `"state":"idle"`
+		}
+		assertAlpha8RawFields(t, state, wantFields)
+		if err := state.Validate(); err != nil {
+			t.Fatalf("standalone state validation rejected %s: %v", wire, err)
+		}
 		if err := peer.SendNotification(ctx, ClientMethodSessionUpdate, json.RawMessage(`{"sessionId":"s","update":`+string(wire)+`}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +109,13 @@ func TestAlpha8NestedStateNotificationPreservesUnknownPayload(t *testing.T) {
 			if got.StateUpdate == nil {
 				t.Fatal("state_update was not dispatched as its known outer variant")
 			}
-			assertAlpha8RawFields(t, got, fields)
+			assertAlpha8RawFields(t, got, wantFields)
+			if err := got.Validate(); err != nil {
+				t.Fatalf("notification validation rejected %s: %v", wire, err)
+			}
+			if tc.none && got.StateUpdate.StateUpdate.Idle.IdleStateUpdate.None == nil {
+				t.Fatalf("expected None after recovery: %s", wire)
+			}
 			encoded, err := json.Marshal(got)
 			if err != nil {
 				t.Fatal(err)
@@ -92,7 +124,19 @@ func TestAlpha8NestedStateNotificationPreservesUnknownPayload(t *testing.T) {
 			if err := json.Unmarshal(encoded, &again); err != nil {
 				t.Fatal(err)
 			}
-			assertAlpha8RawFields(t, again, fields)
+			assertAlpha8RawFields(t, again, wantFields)
+			if err := again.Validate(); err != nil {
+				t.Fatalf("roundtrip validation rejected %s: %v", encoded, err)
+			}
+			if tc.none {
+				var normalized map[string]json.RawMessage
+				if err := json.Unmarshal(encoded, &normalized); err != nil {
+					t.Fatal(err)
+				}
+				if _, present := normalized["stopReason"]; present {
+					t.Fatalf("recovered reason should be omitted: %s", encoded)
+				}
+			}
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
@@ -113,8 +157,34 @@ func assertAlpha8RawFields(t *testing.T, value any, fields string) {
 		t.Fatal(err)
 	}
 	for key, raw := range want {
-		if string(got[key]) != string(raw) {
+		// Compare JSON values independently of object key order while retaining
+		// exact numbers in raw extension fields.
+		decode := func(raw json.RawMessage) any {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			var value any
+			if err := decoder.Decode(&value); err != nil {
+				t.Fatalf("invalid %s: %s err=%v", key, raw, err)
+			}
+			return value
+		}
+		if !reflect.DeepEqual(decode(got[key]), decode(raw)) {
 			t.Fatalf("%s: got %s want %s; wire=%s", key, got[key], raw, encoded)
+		}
+	}
+}
+
+func TestAlpha8StateNotificationRejectsMalformedState(t *testing.T) {
+	receiver := &alpha8Client{updates: make(chan SessionUpdate, 1)}
+	client := &ClientSideConnection{client: receiver}
+	ctx := inboundContext(t, true)
+	for _, state := range []string{``, `,"state":null`, `,"state":123`, `,"state":[]`, `,"state":{}`} {
+		params := json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"state_update"` + state + `}}`)
+		if _, err := client.handle(ctx, ClientMethodSessionUpdate, params); err == nil || err.Code != -32602 {
+			t.Fatalf("malformed state accepted: %s err=%v", params, err)
+		}
+		if len(receiver.updates) != 0 {
+			t.Fatalf("malformed state reached handler: %s", params)
 		}
 	}
 }

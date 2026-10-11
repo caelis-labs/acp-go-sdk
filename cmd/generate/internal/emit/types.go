@@ -1360,9 +1360,12 @@ func unionRequiredAlternatives(schema *load.Schema, def *load.Definition) [][]st
 	alternatives := make([][]string, 0, len(def.AnyOf))
 	for _, candidate := range def.AnyOf {
 		candidate = expandAllOf(schema, candidate)
-		if candidate == nil || len(candidate.Required) == 0 {
+		if candidate == nil {
 			continue
 		}
+		// An alternative with no required properties still participates in
+		// anyOf. Its presence check succeeds without requiring another branch's
+		// fields (for example, an idle update's absent stop reason).
 		required := append([]string(nil), candidate.Required...)
 		sort.Strings(required)
 		alternatives = append(alternatives, required)

@@ -13800,6 +13800,12 @@ func (u *StateUpdate) UnmarshalJSON(b []byte) error {
 						anyOfMatch = true
 					}
 				}
+				{
+					match := true
+					if match {
+						anyOfMatch = true
+					}
+				}
 				if !anyOfMatch {
 					return errors.New("invalid variant payload")
 				}

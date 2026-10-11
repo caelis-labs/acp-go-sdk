@@ -251,6 +251,17 @@ func TestNestedUnionAlternativeProperties(t *testing.T) {
 	}
 }
 
+func TestUnionRequiredAlternativesRetainsOptionalBranch(t *testing.T) {
+	definition := &load.Definition{AnyOf: []*load.Definition{
+		{Required: []string{"stopReason"}},
+		{Title: "none", Type: "object", Properties: map[string]*load.Definition{"stopReason": {Type: "null"}}},
+	}}
+	got := unionRequiredAlternatives(&load.Schema{}, definition)
+	if len(got) != 2 || len(got[0]) != 1 || got[0][0] != "stopReason" || len(got[1]) != 0 {
+		t.Fatalf("optional anyOf alternative was dropped: %#v", got)
+	}
+}
+
 func TestEmitUnionComposesNestedOpenUnion(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		schema := &load.Schema{Defs: map[string]*load.Definition{
