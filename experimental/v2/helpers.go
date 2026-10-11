@@ -13,7 +13,8 @@ func TextBlock(text string) ContentBlock {
 // RunningUpdate is a session/update state_update with state=running.
 func RunningUpdate() SessionUpdate {
 	return SessionUpdate{StateUpdate: &SessionStateUpdate{
-		StateUpdate: StateUpdate{Running: &StateUpdateRunning{}},
+		SessionUpdate: "state_update",
+		StateUpdate:   StateUpdate{Running: &StateUpdateRunning{State: "running"}},
 	}}
 }
 
@@ -22,17 +23,17 @@ func IdleUpdate(reason string) SessionUpdate {
 	var idle IdleStateUpdate
 	switch reason {
 	case "end_turn":
-		idle.EndTurn = &IdleStateUpdateEndTurn{}
+		idle.EndTurn = &IdleStateUpdateEndTurn{StopReason: reason}
 	case "max_tokens":
-		idle.MaxTokens = &IdleStateUpdateMaxTokens{}
+		idle.MaxTokens = &IdleStateUpdateMaxTokens{StopReason: reason}
 	case "max_turn_requests":
-		idle.MaxTurnRequests = &IdleStateUpdateMaxTurnRequests{}
+		idle.MaxTurnRequests = &IdleStateUpdateMaxTurnRequests{StopReason: reason}
 	case "refusal":
-		idle.Refusal = &IdleStateUpdateRefusal{}
+		idle.Refusal = &IdleStateUpdateRefusal{StopReason: reason}
 	case "cancelled":
-		idle.Cancelled = &IdleStateUpdateCancelled{}
+		idle.Cancelled = &IdleStateUpdateCancelled{StopReason: reason}
 	case "error":
-		idle.Error = &IdleStateUpdateError{}
+		idle.Error = &IdleStateUpdateError{StopReason: reason}
 	default:
 		// A string-only object cannot fail JSON encoding. Preserve custom and
 		// future reasons as the schema's raw Other variant.
@@ -41,7 +42,8 @@ func IdleUpdate(reason string) SessionUpdate {
 		idle.Other = &raw
 	}
 	return SessionUpdate{StateUpdate: &SessionStateUpdate{
-		StateUpdate: StateUpdate{Idle: &StateUpdateIdle{IdleStateUpdate: idle}},
+		SessionUpdate: "state_update",
+		StateUpdate:   StateUpdate{Idle: &StateUpdateIdle{State: "idle", IdleStateUpdate: idle}},
 	}}
 }
 
@@ -56,6 +58,7 @@ func IdleErrorUpdate(failure *Error) SessionUpdate {
 // RequiresActionUpdate is a session/update state_update with state=requires_action.
 func RequiresActionUpdate() SessionUpdate {
 	return SessionUpdate{StateUpdate: &SessionStateUpdate{
-		StateUpdate: StateUpdate{RequiresAction: &StateUpdateRequiresAction{}},
+		SessionUpdate: "state_update",
+		StateUpdate:   StateUpdate{RequiresAction: &StateUpdateRequiresAction{State: "requires_action"}},
 	}}
 }

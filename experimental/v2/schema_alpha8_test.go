@@ -176,6 +176,9 @@ func TestAlpha8IdleErrorAndRecovery(t *testing.T) {
 func TestAlpha8IdleHelperReasons(t *testing.T) {
 	for _, reason := range []string{"end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled", "error", "_paused", "future", "", "_quoted\"\n\x00"} {
 		update := IdleUpdate(reason)
+		if update.StateUpdate.SessionUpdate != "state_update" || update.StateUpdate.StateUpdate.Idle.State != "idle" {
+			t.Fatal("helper omitted the typed update/state discriminators")
+		}
 		encoded, err := json.Marshal(update)
 		if err != nil {
 			t.Fatal(err)
