@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 )
 
 // Authentication-related capabilities supported by the agent.
@@ -499,6 +500,94 @@ type AuthMethodTerminalInline struct {
 	Type string `json:"type"`
 }
 
+func (v *AuthMethodTerminalInline) UnmarshalJSON(b []byte) error {
+	*v = AuthMethodTerminalInline{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["id"]
+		if !ok {
+			return fmt.Errorf("id is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("id must not be null")
+		}
+	}
+	{
+		raw, ok := m["name"]
+		if !ok {
+			return fmt.Errorf("name is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("name must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	{
+		raw, ok := m["args"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["env"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	type Alias AuthMethodTerminalInline
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = AuthMethodTerminalInline(a)
+	return nil
+}
+
 type AuthMethod struct {
 	// Client runs the configured agent program as a separate interactive
 	// process, without passing this method to 'authenticate'.
@@ -770,6 +859,52 @@ func (v *AuthMethodTerminal) UnmarshalJSON(b []byte) error {
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return fmt.Errorf("name must not be null")
+		}
+	}
+	{
+		raw, ok := m["args"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["env"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 	type Alias AuthMethodTerminal
@@ -1506,11 +1641,52 @@ type ClientSessionCapabilities struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Support for ID-addressed context compaction updates. Omitted or 'null'
+	// means unsupported; '{}' advertises the complete compaction contract.
+	Compaction *CompactionCapabilities `json:"compaction,omitempty"`
 	// Config option capabilities supported by the client.
 	//
 	// Omitted or 'null' both mean the client does not advertise support for any
 	// config option extensions.
 	ConfigOptions *SessionConfigOptionsCapabilities `json:"configOptions,omitempty"`
+	// Support for live user-facing 'notice' session updates.
+	//
+	// Optional. Omitted or 'null' both mean the client does not advertise support.
+	// Supplying '{}' means the client can present notices to the user.
+	Notices *NoticeCapabilities `json:"notices,omitempty"`
+}
+
+func (v *ClientSessionCapabilities) UnmarshalJSON(b []byte) error {
+	*v = ClientSessionCapabilities{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias ClientSessionCapabilities
+	var a Alias
+	var raw struct {
+		Alias
+		Compaction json.RawMessage `json:"compaction"`
+		Notices    json.RawMessage `json:"notices"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value *CompactionCapabilities
+		if json.Unmarshal(raw.Compaction, &value) == nil {
+			a.Compaction = value
+		}
+	}
+	{
+		var value *NoticeCapabilities
+		if json.Unmarshal(raw.Notices, &value) == nil {
+			a.Notices = value
+		}
+	}
+	*v = ClientSessionCapabilities(a)
+	return nil
 }
 
 // Request parameters for closing an active session.
@@ -1571,6 +1747,301 @@ type CloseSessionResponse struct {
 
 func (v *CloseSessionResponse) Validate() error {
 	return nil
+}
+
+// Client support for ID-addressed context compaction updates.
+type CompactionCapabilities struct{}
+
+// Unique identifier for a context compaction within a session.
+type CompactionId string
+
+// Lifecycle state of a context compaction.
+type CompactionStatus string
+
+const (
+	CompactionStatusInProgress CompactionStatus = "in_progress"
+	CompactionStatusCompleted  CompactionStatus = "completed"
+	CompactionStatusFailed     CompactionStatus = "failed"
+	CompactionStatusCancelled  CompactionStatus = "cancelled"
+)
+
+// A content block appended to a compaction's summary. A first-seen ID creates
+// an in-progress compaction. Chunks append in receive order.
+// Agents MUST only send this update when the Client advertised
+// ['ClientSessionCapabilities::compaction'].
+type CompactionSummaryChunk struct {
+	// Metadata scoped to this chunk. Omission and 'null' both mean absent.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// ID of the compaction whose summary receives this content.
+	CompactionId CompactionId `json:"compactionId"`
+	// One content block to append.
+	Content ContentBlock `json:"content"`
+}
+
+func (v *CompactionSummaryChunk) UnmarshalJSON(b []byte) error {
+	*v = CompactionSummaryChunk{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["content"]
+		if !ok {
+			return fmt.Errorf("content is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("content must not be null")
+		}
+	}
+	type Alias CompactionSummaryChunk
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = CompactionSummaryChunk(a)
+	return nil
+}
+
+// A context compaction upsert. The first notification fixes the compaction's
+// timeline position. Later updates with the same ID patch that entity in place.
+// Agents MUST only send this update when the Client advertised
+// ['ClientSessionCapabilities::compaction'].
+//
+// 'summary', 'error', and '_meta' have patch semantics: omission leaves the
+// stored value unchanged, 'null' clears it, and a concrete value replaces it.
+// 'summary: []' also clears the summary.
+type CompactionUpdate struct {
+	// Extensible metadata patch for this compaction.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The Agent-owned ID of this compaction, unique within the session.
+	CompactionId CompactionId `json:"compactionId"`
+	// Human-readable error details for the compaction.
+	Error *string `json:"error,omitempty"`
+	// Current lifecycle status.
+	Status CompactionStatus `json:"status"`
+	// Complete replacement user-displayable summary content for the compaction.
+	Summary    []ContentBlock `json:"summary,omitempty"`
+	hasMeta    bool           `json:"-"`
+	hasError   bool           `json:"-"`
+	hasSummary bool           `json:"-"`
+}
+
+func (v CompactionUpdate) MarshalJSON() ([]byte, error) {
+	type Alias CompactionUpdate
+	var a Alias
+	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _errorJSON json.RawMessage
+	if a.Error != nil {
+		encoded, err := json.Marshal(*a.Error)
+		if err != nil {
+			return nil, err
+		}
+		_errorJSON = encoded
+	} else if a.hasError {
+		_errorJSON = json.RawMessage("null")
+	}
+	var _summaryJSON json.RawMessage
+	if a.Summary != nil {
+		encoded, err := json.Marshal(a.Summary)
+		if err != nil {
+			return nil, err
+		}
+		_summaryJSON = encoded
+	} else if a.hasSummary {
+		_summaryJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Error   json.RawMessage `json:"error,omitempty"`
+		Summary json.RawMessage `json:"summary,omitempty"`
+	}{
+		Alias:   a,
+		Error:   _errorJSON,
+		Meta:    __metaJSON,
+		Summary: _summaryJSON,
+	})
+}
+
+func (v *CompactionUpdate) UnmarshalJSON(b []byte) error {
+	*v = CompactionUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["status"]
+		if !ok {
+			return fmt.Errorf("status is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("status must not be null")
+		}
+	}
+	type Alias CompactionUpdate
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Error   json.RawMessage `json:"error"`
+		Summary json.RawMessage `json:"summary"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Summary, &items) == nil && items != nil {
+			a.Summary = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Summary = append(a.Summary, value)
+				}
+			}
+		}
+	}
+	{
+		_, present := m["_meta"]
+		a.hasMeta = present
+	}
+	{
+		_, present := m["error"]
+		a.hasError = present
+	}
+	{
+		_, present := m["summary"]
+		a.hasSummary = present
+	}
+	*v = CompactionUpdate(a)
+	return nil
+}
+
+func (v CompactionUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *CompactionUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *CompactionUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *CompactionUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v CompactionUpdate) ErrorState() NullableFieldState {
+	if v.Error != nil {
+		return NullableFieldValue
+	}
+	if v.hasError {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *CompactionUpdate) SetError(value string) {
+	v.Error = &value
+	v.hasError = true
+}
+
+func (v *CompactionUpdate) ClearError() {
+	v.Error = nil
+	v.hasError = true
+}
+
+func (v *CompactionUpdate) UnsetError() {
+	v.Error = nil
+	v.hasError = false
+}
+
+func (v CompactionUpdate) SummaryState() NullableFieldState {
+	if v.Summary != nil {
+		return NullableFieldValue
+	}
+	if v.hasSummary {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *CompactionUpdate) SetSummary(value []ContentBlock) {
+	v.Summary = value
+	v.hasSummary = true
+}
+
+func (v *CompactionUpdate) ClearSummary() {
+	v.Summary = nil
+	v.hasSummary = true
+}
+
+func (v *CompactionUpdate) UnsetSummary() {
+	v.Summary = nil
+	v.hasSummary = false
 }
 
 // Notification sent by the agent when a URL-based elicitation is complete.
@@ -2990,6 +3461,80 @@ func (v *CreateTerminalRequest) UnmarshalJSON(b []byte) error {
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return fmt.Errorf("sessionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["args"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["env"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value EnvVariable
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["cwd"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var value string
+				if err := json.Unmarshal(raw, &value); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["outputByteLimit"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var value uint64
+				if err := json.Unmarshal(raw, &value); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	type Alias CreateTerminalRequest
@@ -5312,8 +5857,25 @@ func (v *InitializeResponse) UnmarshalJSON(b []byte) error {
 	}
 	type Alias InitializeResponse
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		AuthMethods json.RawMessage `json:"authMethods"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.AuthMethods, &items) == nil && items != nil {
+			a.AuthMethods = make([]AuthMethod, 0, len(items))
+			for _, item := range items {
+				var value AuthMethod
+				if json.Unmarshal(item, &value) == nil {
+					a.AuthMethods = append(a.AuthMethods, value)
+				}
+			}
+		}
 	}
 	{
 		_rm, _ok := m["agentCapabilities"]
@@ -5541,12 +6103,9 @@ func (v *LoadSessionRequest) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		raw, ok := m["mcpServers"]
+		_, ok := m["mcpServers"]
 		if !ok {
 			return fmt.Errorf("mcpServers is required")
-		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("mcpServers must not be null")
 		}
 	}
 	{
@@ -5558,19 +6117,65 @@ func (v *LoadSessionRequest) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("sessionId must not be null")
 		}
 	}
+	{
+		raw, ok := m["mcpServers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value McpServer
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["additionalDirectories"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias LoadSessionRequest
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
+	}
+	if a.McpServers == nil {
+		a.McpServers = make([]McpServer, 0)
 	}
 	*v = LoadSessionRequest(a)
 	return nil
 }
 
 func (v *LoadSessionRequest) Validate() error {
-	if v.McpServers == nil {
-		return fmt.Errorf("mcpServers is required")
-	}
 	for i := range v.McpServers {
 		if err := v.McpServers[i].Validate(); err != nil {
 			return fmt.Errorf("mcpServers[%d]: %w", i, err)
@@ -5718,6 +6323,80 @@ type McpServerHttpInline struct {
 	Url string `json:"url"`
 }
 
+func (v *McpServerHttpInline) UnmarshalJSON(b []byte) error {
+	*v = McpServerHttpInline{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		_, ok := m["headers"]
+		if !ok {
+			return fmt.Errorf("headers is required")
+		}
+	}
+	{
+		raw, ok := m["name"]
+		if !ok {
+			return fmt.Errorf("name is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("name must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	{
+		raw, ok := m["url"]
+		if !ok {
+			return fmt.Errorf("url is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("url must not be null")
+		}
+	}
+	{
+		raw, ok := m["headers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value HttpHeader
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	type Alias McpServerHttpInline
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	if a.Headers == nil {
+		a.Headers = make([]HttpHeader, 0)
+	}
+	*v = McpServerHttpInline(a)
+	return nil
+}
+
 // SSE transport configuration
 //
 // Only available when the Agent capabilities indicate 'mcp_capabilities.sse' is 'true'.
@@ -5735,6 +6414,80 @@ type McpServerSseInline struct {
 	Type string `json:"type"`
 	// URL to the MCP server.
 	Url string `json:"url"`
+}
+
+func (v *McpServerSseInline) UnmarshalJSON(b []byte) error {
+	*v = McpServerSseInline{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		_, ok := m["headers"]
+		if !ok {
+			return fmt.Errorf("headers is required")
+		}
+	}
+	{
+		raw, ok := m["name"]
+		if !ok {
+			return fmt.Errorf("name is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("name must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	{
+		raw, ok := m["url"]
+		if !ok {
+			return fmt.Errorf("url is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("url must not be null")
+		}
+	}
+	{
+		raw, ok := m["headers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value HttpHeader
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	type Alias McpServerSseInline
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	if a.Headers == nil {
+		a.Headers = make([]HttpHeader, 0)
+	}
+	*v = McpServerSseInline(a)
+	return nil
 }
 
 type McpServer struct {
@@ -5766,9 +6519,6 @@ func (u *McpServer) UnmarshalJSON(b []byte) error {
 				{
 					raw, ok := m["headers"]
 					if !ok {
-						return errors.New("invalid variant payload")
-					}
-					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 						return errors.New("invalid variant payload")
 					}
 					var value []HttpHeader
@@ -5825,9 +6575,6 @@ func (u *McpServer) UnmarshalJSON(b []byte) error {
 				{
 					raw, ok := m["headers"]
 					if !ok {
-						return errors.New("invalid variant payload")
-					}
-					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 						return errors.New("invalid variant payload")
 					}
 					var value []HttpHeader
@@ -5890,9 +6637,6 @@ func (u *McpServer) UnmarshalJSON(b []byte) error {
 				if !ok {
 					match = false
 				}
-				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-					match = false
-				}
 				if ok {
 					var value []string
 					if json.Unmarshal(raw, &value) != nil {
@@ -5918,9 +6662,6 @@ func (u *McpServer) UnmarshalJSON(b []byte) error {
 			{
 				raw, ok := m["env"]
 				if !ok {
-					match = false
-				}
-				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 					match = false
 				}
 				if ok {
@@ -6050,12 +6791,9 @@ func (v *McpServerHttp) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	{
-		raw, ok := m["headers"]
+		_, ok := m["headers"]
 		if !ok {
 			return fmt.Errorf("headers is required")
-		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("headers must not be null")
 		}
 	}
 	{
@@ -6076,10 +6814,36 @@ func (v *McpServerHttp) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("url must not be null")
 		}
 	}
+	{
+		raw, ok := m["headers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value HttpHeader
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias McpServerHttp
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
+	}
+	if a.Headers == nil {
+		a.Headers = make([]HttpHeader, 0)
 	}
 	*v = McpServerHttp(a)
 	return nil
@@ -6108,12 +6872,9 @@ func (v *McpServerSse) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	{
-		raw, ok := m["headers"]
+		_, ok := m["headers"]
 		if !ok {
 			return fmt.Errorf("headers is required")
-		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("headers must not be null")
 		}
 	}
 	{
@@ -6134,10 +6895,36 @@ func (v *McpServerSse) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("url must not be null")
 		}
 	}
+	{
+		raw, ok := m["headers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value HttpHeader
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias McpServerSse
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
+	}
+	if a.Headers == nil {
+		a.Headers = make([]HttpHeader, 0)
 	}
 	*v = McpServerSse(a)
 	return nil
@@ -6168,12 +6955,9 @@ func (v *McpServerStdio) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	{
-		raw, ok := m["args"]
+		_, ok := m["args"]
 		if !ok {
 			return fmt.Errorf("args is required")
-		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("args must not be null")
 		}
 	}
 	{
@@ -6186,12 +6970,9 @@ func (v *McpServerStdio) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		raw, ok := m["env"]
+		_, ok := m["env"]
 		if !ok {
 			return fmt.Errorf("env is required")
-		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("env must not be null")
 		}
 	}
 	{
@@ -6203,10 +6984,62 @@ func (v *McpServerStdio) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("name must not be null")
 		}
 	}
+	{
+		raw, ok := m["args"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["env"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value EnvVariable
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias McpServerStdio
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
+	}
+	if a.Args == nil {
+		a.Args = make([]string, 0)
+	}
+	if a.Env == nil {
+		a.Env = make([]EnvVariable, 0)
 	}
 	*v = McpServerStdio(a)
 	return nil
@@ -6505,12 +7338,55 @@ func (v *NewSessionRequest) UnmarshalJSON(b []byte) error {
 		}
 	}
 	{
-		raw, ok := m["mcpServers"]
+		_, ok := m["mcpServers"]
 		if !ok {
 			return fmt.Errorf("mcpServers is required")
 		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("mcpServers must not be null")
+	}
+	{
+		raw, ok := m["mcpServers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value McpServer
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["additionalDirectories"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 	type Alias NewSessionRequest
@@ -6518,14 +7394,14 @@ func (v *NewSessionRequest) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
 	}
+	if a.McpServers == nil {
+		a.McpServers = make([]McpServer, 0)
+	}
 	*v = NewSessionRequest(a)
 	return nil
 }
 
 func (v *NewSessionRequest) Validate() error {
-	if v.McpServers == nil {
-		return fmt.Errorf("mcpServers is required")
-	}
 	for i := range v.McpServers {
 		if err := v.McpServers[i].Validate(); err != nil {
 			return fmt.Errorf("mcpServers[%d]: %w", i, err)
@@ -6583,6 +7459,101 @@ func (v *NewSessionResponse) UnmarshalJSON(b []byte) error {
 func (v *NewSessionResponse) Validate() error {
 	return nil
 }
+
+// Fire-and-forget information for the user.
+//
+// Notices are live events rather than session history. Agents must not rely on
+// a notice being received, displayed, or seen by the user.
+// Agents MUST only send notices when the Client advertised
+// ['ClientSessionCapabilities::notices']. Otherwise, Agents may use an agent
+// message when the information should still be surfaced to the user.
+//
+// See RFD: [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
+type Notice struct {
+	// Metadata scoped to this notice.
+	//
+	// Omitted and 'null' are equivalent and mean no metadata was supplied.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Optional plain-text detail or guidance.
+	//
+	// Omitted and 'null' are equivalent and mean no description was supplied.
+	Description *string `json:"description,omitempty"`
+	// Presentation severity hint.
+	Severity NoticeSeverity `json:"severity"`
+	// Required non-empty plain-text title that can stand alone.
+	Title string `json:"title"`
+}
+
+func (v *Notice) UnmarshalJSON(b []byte) error {
+	*v = Notice{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["severity"]
+		if !ok {
+			return fmt.Errorf("severity is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("severity must not be null")
+		}
+	}
+	{
+		raw, ok := m["title"]
+		if !ok {
+			return fmt.Errorf("title is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("title must not be null")
+		}
+	}
+	{
+		if raw, ok := m["title"]; ok {
+			var value string
+			if json.Unmarshal(raw, &value) != nil || utf8.RuneCountInString(value) < 1 {
+				return fmt.Errorf("title is too short")
+			}
+		}
+	}
+	type Alias Notice
+	var a Alias
+	var raw struct {
+		Alias
+		Meta        json.RawMessage `json:"_meta"`
+		Description json.RawMessage `json:"description"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Description, &value) == nil {
+			a.Description = value
+		}
+	}
+	*v = Notice(a)
+	return nil
+}
+
+// Client support for presenting live notices to the user.
+type NoticeCapabilities struct{}
+
+// Severity hint for a session notice.
+type NoticeSeverity string
+
+const (
+	NoticeSeverityInfo    NoticeSeverity = "info"
+	NoticeSeverityWarning NoticeSeverity = "warning"
+	NoticeSeverityError   NoticeSeverity = "error"
+)
 
 // Schema for number (floating-point) properties in an elicitation form.
 type NumberPropertySchema struct {
@@ -7063,6 +8034,34 @@ func (v *ReadTextFileRequest) UnmarshalJSON(b []byte) error {
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return fmt.Errorf("sessionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["line"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var value uint32
+				if err := json.Unmarshal(raw, &value); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["limit"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var value uint32
+				if err := json.Unmarshal(raw, &value); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	type Alias ReadTextFileRequest
@@ -7680,6 +8679,52 @@ func (v *ResumeSessionRequest) UnmarshalJSON(b []byte) error {
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return fmt.Errorf("sessionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["mcpServers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value McpServer
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["additionalDirectories"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 	type Alias ResumeSessionRequest
@@ -9154,6 +10199,388 @@ type SessionUsageUpdate struct {
 	Used uint64 `json:"used"`
 }
 
+// Information for the user that is not part of session history.
+//
+// Agents MUST only send this update when the Client advertised
+// ['ClientSessionCapabilities::notices'].
+type SessionUpdateNotice struct {
+	// Metadata scoped to this notice.
+	//
+	// Omitted and 'null' are equivalent and mean no metadata was supplied.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Optional plain-text detail or guidance.
+	//
+	// Omitted and 'null' are equivalent and mean no description was supplied.
+	Description   *string `json:"description,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
+	// Presentation severity hint.
+	Severity NoticeSeverity `json:"severity"`
+	// Required non-empty plain-text title that can stand alone.
+	Title string `json:"title"`
+}
+
+func (v *SessionUpdateNotice) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateNotice{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	{
+		raw, ok := m["severity"]
+		if !ok {
+			return fmt.Errorf("severity is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("severity must not be null")
+		}
+	}
+	{
+		raw, ok := m["title"]
+		if !ok {
+			return fmt.Errorf("title is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("title must not be null")
+		}
+	}
+	{
+		if raw, ok := m["title"]; ok {
+			var value string
+			if json.Unmarshal(raw, &value) != nil || utf8.RuneCountInString(value) < 1 {
+				return fmt.Errorf("title is too short")
+			}
+		}
+	}
+	type Alias SessionUpdateNotice
+	var a Alias
+	var raw struct {
+		Alias
+		Meta        json.RawMessage `json:"_meta"`
+		Description json.RawMessage `json:"description"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Description, &value) == nil {
+			a.Description = value
+		}
+	}
+	*v = SessionUpdateNotice(a)
+	return nil
+}
+
+// A context compaction has been created or updated.
+//
+// Agents MUST only send this update when the Client advertised
+// ['ClientSessionCapabilities::compaction'].
+type SessionCompactionUpdate struct {
+	// Extensible metadata patch for this compaction.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The Agent-owned ID of this compaction, unique within the session.
+	CompactionId CompactionId `json:"compactionId"`
+	// Human-readable error details for the compaction.
+	Error         *string `json:"error,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
+	// Current lifecycle status.
+	Status CompactionStatus `json:"status"`
+	// Complete replacement user-displayable summary content for the compaction.
+	Summary    []ContentBlock `json:"summary,omitempty"`
+	hasMeta    bool           `json:"-"`
+	hasError   bool           `json:"-"`
+	hasSummary bool           `json:"-"`
+}
+
+func (v SessionCompactionUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionCompactionUpdate
+	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _errorJSON json.RawMessage
+	if a.Error != nil {
+		encoded, err := json.Marshal(*a.Error)
+		if err != nil {
+			return nil, err
+		}
+		_errorJSON = encoded
+	} else if a.hasError {
+		_errorJSON = json.RawMessage("null")
+	}
+	var _summaryJSON json.RawMessage
+	if a.Summary != nil {
+		encoded, err := json.Marshal(a.Summary)
+		if err != nil {
+			return nil, err
+		}
+		_summaryJSON = encoded
+	} else if a.hasSummary {
+		_summaryJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Error   json.RawMessage `json:"error,omitempty"`
+		Summary json.RawMessage `json:"summary,omitempty"`
+	}{
+		Alias:   a,
+		Error:   _errorJSON,
+		Meta:    __metaJSON,
+		Summary: _summaryJSON,
+	})
+}
+
+func (v *SessionCompactionUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionCompactionUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	{
+		raw, ok := m["status"]
+		if !ok {
+			return fmt.Errorf("status is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("status must not be null")
+		}
+	}
+	type Alias SessionCompactionUpdate
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Error   json.RawMessage `json:"error"`
+		Summary json.RawMessage `json:"summary"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Summary, &items) == nil && items != nil {
+			a.Summary = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Summary = append(a.Summary, value)
+				}
+			}
+		}
+	}
+	{
+		_, present := m["_meta"]
+		a.hasMeta = present
+	}
+	{
+		_, present := m["error"]
+		a.hasError = present
+	}
+	{
+		_, present := m["summary"]
+		a.hasSummary = present
+	}
+	*v = SessionCompactionUpdate(a)
+	return nil
+}
+
+func (v SessionCompactionUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionCompactionUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionCompactionUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionCompactionUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionCompactionUpdate) ErrorState() NullableFieldState {
+	if v.Error != nil {
+		return NullableFieldValue
+	}
+	if v.hasError {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionCompactionUpdate) SetError(value string) {
+	v.Error = &value
+	v.hasError = true
+}
+
+func (v *SessionCompactionUpdate) ClearError() {
+	v.Error = nil
+	v.hasError = true
+}
+
+func (v *SessionCompactionUpdate) UnsetError() {
+	v.Error = nil
+	v.hasError = false
+}
+
+func (v SessionCompactionUpdate) SummaryState() NullableFieldState {
+	if v.Summary != nil {
+		return NullableFieldValue
+	}
+	if v.hasSummary {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionCompactionUpdate) SetSummary(value []ContentBlock) {
+	v.Summary = value
+	v.hasSummary = true
+}
+
+func (v *SessionCompactionUpdate) ClearSummary() {
+	v.Summary = nil
+	v.hasSummary = true
+}
+
+func (v *SessionCompactionUpdate) UnsetSummary() {
+	v.Summary = nil
+	v.hasSummary = false
+}
+
+// A content block appended to a context compaction's retained summary.
+//
+// Agents MUST only send this update when the Client advertised
+// ['ClientSessionCapabilities::compaction'].
+type SessionUpdateCompactionSummaryChunk struct {
+	// Metadata scoped to this chunk. Omission and 'null' both mean absent.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// ID of the compaction whose summary receives this content.
+	CompactionId CompactionId `json:"compactionId"`
+	// One content block to append.
+	Content       ContentBlock `json:"content"`
+	SessionUpdate string       `json:"sessionUpdate"`
+}
+
+func (v *SessionUpdateCompactionSummaryChunk) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateCompactionSummaryChunk{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["content"]
+		if !ok {
+			return fmt.Errorf("content is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("content must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionUpdateCompactionSummaryChunk
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = SessionUpdateCompactionSummaryChunk(a)
+	return nil
+}
+
 type SessionUpdate struct {
 	// A chunk of the user's message being streamed.
 	UserMessageChunk *SessionUpdateUserMessageChunk `json:"-"`
@@ -9180,6 +10607,21 @@ type SessionUpdate struct {
 	SessionInfoUpdate *SessionSessionInfoUpdate `json:"-"`
 	// Context window and cost update for the session.
 	UsageUpdate *SessionUsageUpdate `json:"-"`
+	// Information for the user that is not part of session history.
+	//
+	// Agents MUST only send this update when the Client advertised
+	// ['ClientSessionCapabilities::notices'].
+	Notice *SessionUpdateNotice `json:"-"`
+	// A context compaction has been created or updated.
+	//
+	// Agents MUST only send this update when the Client advertised
+	// ['ClientSessionCapabilities::compaction'].
+	CompactionUpdate *SessionCompactionUpdate `json:"-"`
+	// A content block appended to a context compaction's retained summary.
+	//
+	// Agents MUST only send this update when the Client advertised
+	// ['ClientSessionCapabilities::compaction'].
+	CompactionSummaryChunk *SessionUpdateCompactionSummaryChunk `json:"-"`
 }
 
 func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
@@ -9568,6 +11010,144 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 				}
 				u.UsageUpdate = &v
 				return nil
+			case "notice":
+				{
+					raw, ok := m["sessionUpdate"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["severity"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value NoticeSeverity
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["title"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v SessionUpdateNotice
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Notice = &v
+				return nil
+			case "compaction_update":
+				{
+					raw, ok := m["compactionId"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value CompactionId
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["sessionUpdate"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["status"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value CompactionStatus
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v SessionCompactionUpdate
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.CompactionUpdate = &v
+				return nil
+			case "compaction_summary_chunk":
+				{
+					raw, ok := m["compactionId"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value CompactionId
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["content"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value ContentBlock
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["sessionUpdate"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v SessionUpdateCompactionSummaryChunk
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.CompactionSummaryChunk = &v
+				return nil
 			}
 		}
 	} else {
@@ -9713,6 +11293,42 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 		m["sessionUpdate"] = json.RawMessage("\"usage_update\"")
 		return json.Marshal(m)
 	}
+	if u.Notice != nil {
+		_b, _e := json.Marshal(*u.Notice)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = json.RawMessage("\"notice\"")
+		return json.Marshal(m)
+	}
+	if u.CompactionUpdate != nil {
+		_b, _e := json.Marshal(*u.CompactionUpdate)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = json.RawMessage("\"compaction_update\"")
+		return json.Marshal(m)
+	}
+	if u.CompactionSummaryChunk != nil {
+		_b, _e := json.Marshal(*u.CompactionSummaryChunk)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = json.RawMessage("\"compaction_summary_chunk\"")
+		return json.Marshal(m)
+	}
 	return []byte{}, nil
 }
 
@@ -9749,6 +11365,15 @@ func (u *SessionUpdate) Validate() error {
 		count++
 	}
 	if u.UsageUpdate != nil {
+		count++
+	}
+	if u.Notice != nil {
+		count++
+	}
+	if u.CompactionUpdate != nil {
+		count++
+	}
+	if u.CompactionSummaryChunk != nil {
 		count++
 	}
 	if count != 1 {

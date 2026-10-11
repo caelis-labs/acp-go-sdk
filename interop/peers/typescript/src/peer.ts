@@ -86,6 +86,32 @@ function textFromUpdate(notification: acp.SessionNotification): string | undefin
   return undefined;
 }
 
+function displayUpdates(): acp.SessionUpdate[] {
+  return [
+    { sessionUpdate: "notice", severity: "warning", title: "Interop notice" },
+    { sessionUpdate: "compaction_update", compactionId: "interop-compaction", status: "in_progress" },
+    { sessionUpdate: "compaction_summary_chunk", compactionId: "interop-compaction", content: { type: "text", text: "Retained summary" } },
+    { sessionUpdate: "compaction_update", compactionId: "interop-compaction", status: "completed", summary: [], error: null, _meta: null },
+  ];
+}
+
+function updateEvent(notification: acp.SessionNotification): string | undefined {
+  const update = notification.update;
+  if (update.sessionUpdate === "notice") return `notice:${update.severity}:${update.title}`;
+  if (update.sessionUpdate === "compaction_summary_chunk" && update.content.type === "text") {
+    return `summary:${update.compactionId}:${update.content.text}`;
+  }
+  if (update.sessionUpdate === "compaction_update") {
+    const valid = update.status === "in_progress"
+      ? !("summary" in update) && !("error" in update) && !("_meta" in update)
+      : Array.isArray(update.summary) && update.summary.length === 0 && update.error === null && update._meta === null;
+    if (!valid) throw new Error("compaction patch state lost");
+    return `compaction:${update.compactionId}:${update.status}:${update.status === "in_progress" ? "absent" : "cleared"}`;
+  }
+  const text = textFromUpdate(notification);
+  return text === undefined ? undefined : `update:${text}`;
+}
+
 async function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return;
@@ -112,15 +138,25 @@ async function runAgent(options: Options): Promise<void> {
 
   const app = acp
     .agent({ name: "acp-go-sdk-typescript-interop-agent" })
-    .onRequest(acp.methods.agent.initialize, (ctx) => ({
-      protocolVersion: ctx.params.protocolVersion,
-      agentCapabilities: {},
-      authMethods: [],
-      agentInfo: {
-        name: "typescript-interop-agent",
-        version: "1.7.0",
-      },
-    }))
+    .onRequest(acp.methods.agent.initialize, (ctx) => {
+      if (
+        !ctx.params.clientCapabilities?.session?.compaction ||
+        !ctx.params.clientCapabilities?.session?.notices
+      ) {
+        throw acp.RequestError.invalidParams({
+          error: "interop client must advertise display capabilities",
+        });
+      }
+      return {
+        protocolVersion: ctx.params.protocolVersion,
+        agentCapabilities: {},
+        authMethods: [],
+        agentInfo: {
+          name: "typescript-interop-agent",
+          version: "1.8.0",
+        },
+      };
+    })
     .onRequest(acp.methods.agent.session.new, () => {
       nextSession += 1;
       const sessionId = `typescript-session-${nextSession}`;
@@ -170,6 +206,9 @@ async function runAgent(options: Options): Promise<void> {
           permission.outcome.optionId !== "allow"
         ) {
           throw new Error(`unexpected permission outcome ${JSON.stringify(permission)}`);
+        }
+        for (const update of displayUpdates()) {
+          await ctx.client.notify(acp.methods.client.session.update, { sessionId, update });
         }
         await ctx.client.notify(acp.methods.client.session.update, {
           sessionId,
@@ -292,10 +331,8 @@ async function runClient(options: Options): Promise<void> {
       };
     })
     .onNotification(acp.methods.client.session.update, (ctx) => {
-      const text = textFromUpdate(ctx.params);
-      if (text !== undefined) {
-        events.push(`update:${text}`);
-      }
+      const event = updateEvent(ctx.params);
+      if (event !== undefined) events.push(event);
     });
 
   const observation: Observation = {
@@ -311,10 +348,10 @@ async function runClient(options: Options): Promise<void> {
     await app.connectWith(acp.ndJsonStream(output, input), async (agent) => {
       const initialized = await agent.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {},
+        clientCapabilities: { session: { compaction: {}, notices: {} } },
         clientInfo: {
           name: "typescript-interop-client",
-          version: "1.7.0",
+          version: "1.8.0",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;

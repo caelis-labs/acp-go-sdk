@@ -227,3 +227,26 @@ func TestInitialCommandsRecoveryScope(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionPatchPresenceIncludesCollections(t *testing.T) {
+	properties := map[string]*load.Definition{
+		"compactionId": {Type: "string"}, "status": {Type: "string"},
+		"summary": {Type: []any{"array", "null"}, Items: &load.Definition{Ref: "#/$defs/ContentBlock"}},
+		"error":   {Type: []any{"string", "null"}},
+		"_meta":   {Type: []any{"object", "null"}, AdditionalProperties: true},
+	}
+	got := nullablePresenceProperties(properties, nil)
+	if len(got) != 3 || got[0].propName != "_meta" || got[0].indirect || got[1].propName != "error" || !got[1].indirect || got[2].propName != "summary" || got[2].indirect {
+		t.Fatalf("patch properties=%+v", got)
+	}
+}
+
+func TestNestedUnionAlternativeProperties(t *testing.T) {
+	schema := &load.Schema{Defs: map[string]*load.Definition{
+		"Failure": {Type: "object", Properties: map[string]*load.Definition{"error": {Ref: "#/$defs/Error"}}},
+	}}
+	definition := &load.Definition{AnyOf: []*load.Definition{{AnyOf: []*load.Definition{{AllOf: []*load.Definition{{Ref: "#/$defs/Failure"}}}}}}}
+	if unionAlternativeProperties(schema, definition)["error"] == nil {
+		t.Fatal("nested failure details lost")
+	}
+}

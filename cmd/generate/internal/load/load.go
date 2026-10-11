@@ -46,6 +46,7 @@ type Definition struct {
 	DocsIgnore  bool                   `json:"x-docs-ignore"`
 	Title       string                 `json:"title"`
 	Const       any                    `json:"const"`
+	MinLength   int                    `json:"minLength"`
 	XSide       string                 `json:"x-side"`
 	XMethod     string                 `json:"x-method"`
 	// Default holds the JSON Schema default value, when present.

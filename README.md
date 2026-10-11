@@ -13,7 +13,7 @@ Use it independently of Caelis or any particular agent framework.
 - **Both sides of ACP:** implement an [agent](#agent-side), build a
   [client](#client-side-and-subprocesses), and stream session updates with typed Go APIs.
 - **Stable protocol, pinned schema:** ACP wire protocol v1, generated from
-  official `schema-v1.24.1`. [Trace every generated type to its source](#protocol-provenance).
+  official `schema-v1.25.0`. [Trace every generated type to its source](#protocol-provenance).
 - **Tested across languages:** a [four-direction interoperability matrix](#official-sdk-interoperability)
   checks Go clients and agents against the official TypeScript and Rust SDKs.
 - **Predictable resource and process handling:** bounded queues, ordered
@@ -41,7 +41,7 @@ import acp "github.com/caelis-labs/acp-go-sdk"
 
 The Go module release, official schema version, and negotiated wire protocol
 version are separate identities. The install command pins the SDK release;
-`schema-v1.24.1` describes the schema used to generate its ACP v1 types.
+`schema-v1.25.0` describes the schema used to generate its ACP v1 types.
 
 ## Run an agent and client
 
@@ -194,7 +194,8 @@ make interop
 | Go | Official Rust SDK | Core conversation, session cancellation, request cancellation |
 | Official Rust SDK | Go | Core conversation, session cancellation, request cancellation |
 
-These **12 cases** check ordered session updates, a reverse permission request,
+These **12 cases** check ordered session updates, negotiated notices and
+compaction (including patch clears and summary chunks), a reverse permission request,
 `session/cancel`, and the distinct `$/cancel_request` / JSON-RPC `-32800` path.
 Exact SDK identities and toolchain requirements are recorded in
 [interop/versions.json](interop/versions.json) and [upstream/lock.json](upstream/lock.json).
@@ -210,10 +211,10 @@ See `interop/README.md` for harness boundaries and scenario definitions.
 | Identity | Pinned value |
 |---|---|
 | Wire protocol | 1 |
-| Schema artifact | 1.24.1 |
-| Schema tag | schema-v1.24.1 |
-| Upstream commit | 1761180eeddf0828d4ecc367106a632c61be06d9 |
-| schema.json SHA256 | 3c17bd6385d90cf672d8a661fddc359d73422cf8b8ce6865213d25cfd4c0eca7 |
+| Schema artifact | 1.25.0 |
+| Schema tag | schema-v1.25.0 |
+| Upstream commit | 4cf3dd858c819fc3ab99ae53f76883ede0345a10 |
+| schema.json SHA256 | 4bcd1d2051ff7ed379bd9b234fb9b09c5ab9245478698e9fab805bd9b52a33a6 |
 
 The exact tag object, commit, assets, and hashes are recorded in
 schema/lock.json. Generated stable code uses schema/schema.json only;
@@ -226,7 +227,7 @@ queries GitHub releases and opens an `upstream-drift` issue when a pin is
 behind.
 
 Draft ACP v2 lives in `experimental/v2`. It is generated from
-`schema-v2.0.0-alpha.7` and is not a stable API. `session/prompt` returns the
+`schema-v2.0.0-alpha.8` and is not a stable API. `session/prompt` returns the
 required `messageId` of the user message inserted into the conversation;
 the matching user-message update may arrive before or after that response.
 Running/idle/requires_action are `session/update` state updates. Its typed
@@ -247,6 +248,13 @@ or null names leave an existing name unchanged; `WithStartName` and
 `WithUpdateName` set a name through the session-update helpers. In v2,
 tool-call updates distinguish omission, explicit null (clear), and a string
 (replace) through `NameState`, `SetName`, `ClearName`, and `UnsetName`.
+
+Stable session notices and context compaction are available when the client
+advertises `ClientSessionCapabilities.Notices` and `.Compaction`. Compaction
+`summary`, `error`, and `_meta` preserve omitted/null/value patch states through
+generated `State`, `Set`, `Clear`, and `Unset` methods. See the
+[v1.5.0 migration notes](docs/upgrading-to-v1.5.0.md) for capability policy,
+receiver validation, and the isolated v2 alpha.8 API changes.
 
 ## Resource bounds and lifecycle
 

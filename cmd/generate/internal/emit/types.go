@@ -22,6 +22,7 @@ type nullablePresenceProp struct {
 	propName    string
 	presentName string
 	definition  *load.Definition
+	indirect    bool
 }
 
 // initialCommandsProperty deliberately limits recovery to the newly released
@@ -73,7 +74,9 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 			continue
 		}
 		description := strings.ToLower(definition.Description)
-		if !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
+		compactionPatch := properties["compactionId"] != nil && properties["status"] != nil &&
+			(propertyName == "summary" || propertyName == "error" || propertyName == "_meta")
+		if !compactionPatch && !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
 			continue
 		}
 		fieldName := util.ToExportedField(propertyName)
@@ -82,6 +85,7 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 			propName:    propertyName,
 			presentName: "has" + fieldName,
 			definition:  definition,
+			indirect:    propertyName != "_meta" && ir.PrimaryType(definition) != "array" && ir.PrimaryType(definition) != "object",
 		})
 	}
 	return result
@@ -99,7 +103,11 @@ func emitNullablePresenceMarshalBody(g *Group, properties []nullablePresenceProp
 		rawName := "_" + property.propName + "JSON"
 		g.Var().Id(rawName).Qual("encoding/json", "RawMessage")
 		g.If(Id("a").Dot(property.fieldName).Op("!=").Nil()).BlockFunc(func(h *Group) {
-			h.List(Id("encoded"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(Op("*").Id("a").Dot(property.fieldName))
+			value := Id("a").Dot(property.fieldName)
+			if property.indirect {
+				value = Op("*").Add(value)
+			}
+			h.List(Id("encoded"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(value)
 			h.If(Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
 			h.Id(rawName).Op("=").Id("encoded")
 		}).Else().If(Id("a").Dot(property.presentName)).Block(
@@ -134,8 +142,14 @@ func emitNullablePresenceAccessors(f *File, name string, properties []nullablePr
 			Return(Id("NullableFieldAbsent")),
 		)
 		f.Line()
-		f.Func().Params(Id("v").Op("*").Id(name)).Id("Set"+property.fieldName).Params(Id("value").Add(primitiveJenType(property.definition))).Block(
-			Id("v").Dot(property.fieldName).Op("=").Op("&").Id("value"),
+		valueType := jenTypeForProperty(property.propName, property.definition)
+		value := Id("value")
+		if property.indirect {
+			valueType = primitiveJenType(property.definition)
+			value = Op("&").Id("value")
+		}
+		f.Func().Params(Id("v").Op("*").Id(name)).Id("Set"+property.fieldName).Params(Id("value").Add(valueType)).Block(
+			Id("v").Dot(property.fieldName).Op("=").Add(value),
 			Id("v").Dot(property.presentName).Op("=").True(),
 		)
 		f.Line()
@@ -164,9 +178,10 @@ func emitNullablePresenceJSON(f *File, name string, schema *load.Schema, definit
 		g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
 		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
 		emitRequiredPresenceChecks(g, schema, definition)
+		emitReceiverPropertyChecks(g, schema, definition)
 		g.Type().Id("Alias").Id(name)
 		g.Var().Id("a").Id("Alias")
-		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		emitDisplayRecoveryDecode(g, definition)
 		emitNullablePresenceUnmarshalAssignments(g, properties)
 		g.Op("*").Id("v").Op("=").Id(name).Call(Id("a"))
 		g.Return(Nil())
@@ -549,19 +564,21 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 			// UnmarshalJSON enforces required-property presence and applies defaults
 			// when a field is missing or null (and the schema doesn't include null).
 			initialCommands := initialCommandsProperty(def)
-			if len(def.Required) > 0 || len(defaults) > 0 || len(nullablePresence) > 0 || initialCommands != nil {
+			if len(def.Required) > 0 || len(defaults) > 0 || len(nullablePresence) > 0 || initialCommands != nil || len(displayRecoveryProperties(def)) > 0 {
 				f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
 					g.Op("*").Id("v").Op("=").Id(name).Values()
 					g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
 					g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
 					emitRequiredPresenceChecks(g, schema, def)
+					emitReceiverPropertyChecks(g, schema, def)
 					g.Type().Id("Alias").Id(name)
 					g.Var().Id("a").Id("Alias")
 					if initialCommands != nil {
 						emitInitialCommandsDecode(g, initialCommands)
 					} else {
-						g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+						emitDisplayRecoveryDecode(g, def)
 					}
+					emitReceiverNullDefaults(g, def)
 					for _, dp := range defaults {
 						g.BlockFunc(func(h *Group) {
 							h.List(Id("_rm"), Id("_ok")).Op(":=").Id("m").Index(Lit(dp.propName))
@@ -846,7 +863,7 @@ func emitRequiredPresenceChecks(g *Group, schema *load.Schema, def *load.Definit
 	sort.Strings(required)
 	for _, propName := range required {
 		prop := def.Properties[propName]
-		allowsNull := definitionAllowsNull(schema, prop, make(map[*load.Definition]bool))
+		allowsNull := definitionAllowsNull(schema, prop, make(map[*load.Definition]bool)) || receiverNullIsEmpty(def, propName)
 		g.BlockFunc(func(h *Group) {
 			if allowsNull {
 				h.List(Id("_"), Id("ok")).Op(":=").Id("m").Index(Lit(propName))
@@ -871,9 +888,11 @@ func emitRequiredObjectUnmarshal(f *File, name string, schema *load.Schema, def 
 		g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
 		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
 		emitRequiredPresenceChecks(g, schema, def)
+		emitReceiverPropertyChecks(g, schema, def)
 		g.Type().Id("Alias").Id(name)
 		g.Var().Id("a").Id("Alias")
-		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		emitDisplayRecoveryDecode(g, def)
+		emitReceiverNullDefaults(g, def)
 		g.Op("*").Id("v").Op("=").Id(name).Call(Id("a"))
 		g.Return(Nil())
 	})
@@ -898,7 +917,7 @@ func emitValidateJen(f *File, name string, schema *load.Schema, def *load.Defini
 				allowsNull := definitionAllowsNull(schema, property, make(map[*load.Definition]bool))
 				switch ir.PrimaryType(property) {
 				case "array":
-					if !allowsNull {
+					if !allowsNull && !receiverNullIsEmpty(def, propName) {
 						g.If(Id("v").Dot(field).Op("==").Nil()).Block(
 							Return(Qual("fmt", "Errorf").Call(Lit(propName + " is required"))),
 						)
@@ -1348,6 +1367,9 @@ func unionAlternativeProperties(schema *load.Schema, def *load.Definition) map[s
 		if candidate == nil {
 			continue
 		}
+		for name, property := range unionAlternativeProperties(schema, candidate) {
+			properties[name] = property
+		}
 		for name, property := range candidate.Properties {
 			properties[name] = property
 		}
@@ -1653,6 +1675,12 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			f.Line()
 			if nullableDefinition != nil {
 				emitNullablePresenceJSON(f, tname, schema, nullableDefinition, variantNullable)
+			} else {
+				definition := *v
+				definition.Properties = variantProperties
+				if needsReceiverDecode(&definition) {
+					emitRequiredObjectUnmarshal(f, tname, schema, &definition)
+				}
 			}
 		skipStructEmit:
 		}
@@ -1741,7 +1769,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 								sw.Case(Lit(vi.discValue)).BlockFunc(func(variant *Group) {
 									for _, rk := range vi.required {
 										property := vi.properties[rk]
-										allowsNull := definitionAllowsNull(schema, property, make(map[*load.Definition]bool))
+										allowsNull := definitionAllowsNull(schema, property, make(map[*load.Definition]bool)) || receiverNullIsEmpty(&load.Definition{Properties: vi.properties}, rk)
 										variant.BlockFunc(func(required *Group) {
 											required.List(Id("raw"), Id("ok")).Op(":=").Id("m").Index(Lit(rk))
 											required.If(Op("!").Id("ok")).Block(Return(Qual("errors", "New").Call(Lit("invalid variant payload"))))
@@ -1790,7 +1818,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 						h.Var().Id("match").Bool().Op("=").Lit(true)
 						for _, rk := range vi.required {
 							property := vi.properties[rk]
-							allowsNull := definitionAllowsNull(schema, property, make(map[*load.Definition]bool))
+							allowsNull := definitionAllowsNull(schema, property, make(map[*load.Definition]bool)) || receiverNullIsEmpty(&load.Definition{Properties: vi.properties}, rk)
 							h.BlockFunc(func(required *Group) {
 								required.List(Id("raw"), Id("ok")).Op(":=").Id("m").Index(Lit(rk))
 								required.If(Op("!").Id("ok")).Block(Id("match").Op("=").Lit(false))

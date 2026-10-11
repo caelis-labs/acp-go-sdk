@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 )
 
 // An absolute filesystem path used by the protocol.
@@ -1701,6 +1702,294 @@ func (v *CommandPermissionSubject) UnmarshalJSON(b []byte) error {
 	}
 	*v = CommandPermissionSubject(a)
 	return nil
+}
+
+// Unique identifier for a context compaction within a session.
+type CompactionId string
+
+// Lifecycle state of a context compaction.
+type CompactionStatus string
+
+const (
+	CompactionStatusInProgress CompactionStatus = "in_progress"
+	CompactionStatusCompleted  CompactionStatus = "completed"
+	CompactionStatusFailed     CompactionStatus = "failed"
+	CompactionStatusCancelled  CompactionStatus = "cancelled"
+)
+
+// A content block appended to a compaction's summary. A first-seen ID creates
+// an in-progress compaction. Chunks append in receive order.
+type CompactionSummaryChunk struct {
+	// Metadata scoped to this chunk. Omission and 'null' both mean absent.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// ID of the compaction whose summary receives this content.
+	CompactionId CompactionId `json:"compactionId"`
+	// One content block to append.
+	Content ContentBlock `json:"content"`
+}
+
+func (v *CompactionSummaryChunk) UnmarshalJSON(b []byte) error {
+	*v = CompactionSummaryChunk{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["content"]
+		if !ok {
+			return fmt.Errorf("content is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("content must not be null")
+		}
+	}
+	type Alias CompactionSummaryChunk
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = CompactionSummaryChunk(a)
+	return nil
+}
+
+// A context compaction upsert. The first notification fixes the compaction's
+// timeline position. Later updates with the same ID patch that entity in place.
+//
+// 'summary', 'error', and '_meta' have patch semantics: omission leaves the
+// stored value unchanged, 'null' clears it, and a concrete value replaces it.
+// 'summary: []' also clears the summary.
+type CompactionUpdate struct {
+	// Extensible metadata patch for this compaction.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The Agent-owned ID of this compaction, unique within the session.
+	CompactionId CompactionId `json:"compactionId"`
+	// Human-readable error details for the compaction.
+	Error *string `json:"error,omitempty"`
+	// Current lifecycle status.
+	Status CompactionStatus `json:"status"`
+	// Complete replacement user-displayable summary content for the compaction.
+	Summary    []ContentBlock `json:"summary,omitempty"`
+	hasMeta    bool           `json:"-"`
+	hasError   bool           `json:"-"`
+	hasSummary bool           `json:"-"`
+}
+
+func (v CompactionUpdate) MarshalJSON() ([]byte, error) {
+	type Alias CompactionUpdate
+	var a Alias
+	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _errorJSON json.RawMessage
+	if a.Error != nil {
+		encoded, err := json.Marshal(*a.Error)
+		if err != nil {
+			return nil, err
+		}
+		_errorJSON = encoded
+	} else if a.hasError {
+		_errorJSON = json.RawMessage("null")
+	}
+	var _summaryJSON json.RawMessage
+	if a.Summary != nil {
+		encoded, err := json.Marshal(a.Summary)
+		if err != nil {
+			return nil, err
+		}
+		_summaryJSON = encoded
+	} else if a.hasSummary {
+		_summaryJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Error   json.RawMessage `json:"error,omitempty"`
+		Summary json.RawMessage `json:"summary,omitempty"`
+	}{
+		Alias:   a,
+		Error:   _errorJSON,
+		Meta:    __metaJSON,
+		Summary: _summaryJSON,
+	})
+}
+
+func (v *CompactionUpdate) UnmarshalJSON(b []byte) error {
+	*v = CompactionUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["status"]
+		if !ok {
+			return fmt.Errorf("status is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("status must not be null")
+		}
+	}
+	type Alias CompactionUpdate
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Error   json.RawMessage `json:"error"`
+		Summary json.RawMessage `json:"summary"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Summary, &items) == nil && items != nil {
+			a.Summary = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Summary = append(a.Summary, value)
+				}
+			}
+		}
+	}
+	{
+		_, present := m["_meta"]
+		a.hasMeta = present
+	}
+	{
+		_, present := m["error"]
+		a.hasError = present
+	}
+	{
+		_, present := m["summary"]
+		a.hasSummary = present
+	}
+	*v = CompactionUpdate(a)
+	return nil
+}
+
+func (v CompactionUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *CompactionUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *CompactionUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *CompactionUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v CompactionUpdate) ErrorState() NullableFieldState {
+	if v.Error != nil {
+		return NullableFieldValue
+	}
+	if v.hasError {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *CompactionUpdate) SetError(value string) {
+	v.Error = &value
+	v.hasError = true
+}
+
+func (v *CompactionUpdate) ClearError() {
+	v.Error = nil
+	v.hasError = true
+}
+
+func (v *CompactionUpdate) UnsetError() {
+	v.Error = nil
+	v.hasError = false
+}
+
+func (v CompactionUpdate) SummaryState() NullableFieldState {
+	if v.Summary != nil {
+		return NullableFieldValue
+	}
+	if v.hasSummary {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *CompactionUpdate) SetSummary(value []ContentBlock) {
+	v.Summary = value
+	v.hasSummary = true
+}
+
+func (v *CompactionUpdate) ClearSummary() {
+	v.Summary = nil
+	v.hasSummary = true
+}
+
+func (v *CompactionUpdate) UnsetSummary() {
+	v.Summary = nil
+	v.hasSummary = false
 }
 
 // Notification sent by the agent when a URL-based elicitation is complete.
@@ -5623,6 +5912,15 @@ func (u *ErrorCode) Validate() error {
 	return nil
 }
 
+// Details of a failure that ended active work.
+type ErrorStopReason struct {
+	// The failure, as a JSON-RPC error object.
+	//
+	// Optional. Omitted or 'null' both mean the agent is not reporting failure details.
+	// Agents SHOULD include it.
+	Error *Error `json:"error,omitempty"`
+}
+
 // Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
 // Extension notifications provide a way to send one-way messages for custom functionality
 // while maintaining protocol compatibility.
@@ -5743,18 +6041,506 @@ const (
 )
 
 // The agent is ready to process a new prompt.
-type IdleStateUpdate struct {
+//
+// Agents SHOULD include a 'stopReason' when the idle transition ends foreground
+// work. An omitted, 'null', or malformed 'stopReason' means the agent is not
+// reporting one.
+// The active work ended successfully.
+type IdleStateUpdateEndTurn struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
+	StopReason string                     `json:"stopReason"`
+}
+
+// The active work ended because the agent reached the maximum number of tokens.
+type IdleStateUpdateMaxTokens struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
+	StopReason string                     `json:"stopReason"`
+}
+
+// The active work ended because the agent reached the maximum number of
+// allowed agent requests before returning idle.
+type IdleStateUpdateMaxTurnRequests struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
+	StopReason string                     `json:"stopReason"`
+}
+
+// The active work ended because the agent refused to continue. The user
+// prompt and everything that comes after it won't be included in the next
+// prompt, so this should be reflected in the UI.
+type IdleStateUpdateRefusal struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
+	StopReason string                     `json:"stopReason"`
+}
+
+// Active session work was cancelled by the client via 'session/cancel'.
+//
+// Agents should report this stop reason on an idle 'state_update' session update
+// when cancellation succeeds, even if cancellation causes exceptions in
+// underlying operations.
+type IdleStateUpdateCancelled struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
+	StopReason string                     `json:"stopReason"`
+}
+
+// The active work ended because something failed.
+//
+// For work started by a prompt, this covers failures after the user message
+// was inserted; earlier failures are an error response to 'session/prompt'.
+type IdleStateUpdateError struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
 	// these keys.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Indicates why foreground work stopped.
+	// The failure, as a JSON-RPC error object.
 	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason.
-	// Agents SHOULD include this when the idle transition ends foreground work.
-	StopReason *StopReason `json:"stopReason,omitempty"`
+	// Optional. Omitted or 'null' both mean the agent is not reporting failure details.
+	// Agents SHOULD include it.
+	Error      *Error `json:"error,omitempty"`
+	StopReason string `json:"stopReason"`
+}
+
+func (v *IdleStateUpdateError) UnmarshalJSON(b []byte) error {
+	*v = IdleStateUpdateError{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["stopReason"]
+		if !ok {
+			return fmt.Errorf("stopReason is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("stopReason must not be null")
+		}
+	}
+	type Alias IdleStateUpdateError
+	var a Alias
+	var raw struct {
+		Alias
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value *Error
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	*v = IdleStateUpdateError(a)
+	return nil
+}
+
+// Custom or future stop reason.
+//
+// Values beginning with '_' are reserved for implementation-specific
+// extensions. Unknown values that do not begin with '_' are reserved for
+// future ACP variants.
+type IdleStateUpdateOther = json.RawMessage
+
+// No stop reason: 'stopReason' is omitted or 'null'.
+type IdleStateUpdateNone struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
+	StopReason any                        `json:"stopReason,omitempty"`
+}
+
+func (v *IdleStateUpdateNone) UnmarshalJSON(b []byte) error {
+	*v = IdleStateUpdateNone{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias IdleStateUpdateNone
+	var a Alias
+	var raw struct {
+		Alias
+		StopReason json.RawMessage `json:"stopReason"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+	}
+	*v = IdleStateUpdateNone(a)
+	return nil
+}
+
+type IdleStateUpdate struct {
+	// The active work ended successfully.
+	EndTurn *IdleStateUpdateEndTurn `json:"-"`
+	// The active work ended because the agent reached the maximum number of tokens.
+	MaxTokens *IdleStateUpdateMaxTokens `json:"-"`
+	// The active work ended because the agent reached the maximum number of
+	// allowed agent requests before returning idle.
+	MaxTurnRequests *IdleStateUpdateMaxTurnRequests `json:"-"`
+	// The active work ended because the agent refused to continue. The user
+	// prompt and everything that comes after it won't be included in the next
+	// prompt, so this should be reflected in the UI.
+	Refusal *IdleStateUpdateRefusal `json:"-"`
+	// Active session work was cancelled by the client via 'session/cancel'.
+	//
+	// Agents should report this stop reason on an idle 'state_update' session update
+	// when cancellation succeeds, even if cancellation causes exceptions in
+	// underlying operations.
+	Cancelled *IdleStateUpdateCancelled `json:"-"`
+	// The active work ended because something failed.
+	//
+	// For work started by a prompt, this covers failures after the user message
+	// was inserted; earlier failures are an error response to 'session/prompt'.
+	Error *IdleStateUpdateError `json:"-"`
+	// Custom or future stop reason.
+	//
+	// Values beginning with '_' are reserved for implementation-specific
+	// extensions. Unknown values that do not begin with '_' are reserved for
+	// future ACP variants.
+	Other *IdleStateUpdateOther `json:"-"`
+	// No stop reason: 'stopReason' is omitted or 'null'.
+	None *IdleStateUpdateNone `json:"-"`
+}
+
+func (u *IdleStateUpdate) UnmarshalJSON(b []byte) error {
+	*u = IdleStateUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err == nil {
+		{
+			var disc string
+			if v, ok := m["stopReason"]; ok {
+				json.Unmarshal(v, &disc)
+			}
+			switch disc {
+			case "end_turn":
+				{
+					raw, ok := m["stopReason"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v IdleStateUpdateEndTurn
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.EndTurn = &v
+				return nil
+			case "max_tokens":
+				{
+					raw, ok := m["stopReason"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v IdleStateUpdateMaxTokens
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.MaxTokens = &v
+				return nil
+			case "max_turn_requests":
+				{
+					raw, ok := m["stopReason"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v IdleStateUpdateMaxTurnRequests
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.MaxTurnRequests = &v
+				return nil
+			case "refusal":
+				{
+					raw, ok := m["stopReason"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v IdleStateUpdateRefusal
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Refusal = &v
+				return nil
+			case "cancelled":
+				{
+					raw, ok := m["stopReason"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v IdleStateUpdateCancelled
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Cancelled = &v
+				return nil
+			case "error":
+				{
+					raw, ok := m["stopReason"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v IdleStateUpdateError
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Error = &v
+				return nil
+			}
+		}
+		{
+			var v IdleStateUpdateOther
+			var match bool = true
+			{
+				raw, ok := m["stopReason"]
+				if !ok {
+					match = false
+				}
+				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					match = false
+				}
+				if ok {
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						match = false
+					}
+				}
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Other = &v
+				return nil
+			}
+		}
+	} else {
+		if _, ok := err.(*json.UnmarshalTypeError); !ok {
+			return err
+		}
+	}
+	var arr []map[string]json.RawMessage
+	if json.Unmarshal(b, &arr) == nil {
+	}
+	{
+		var v IdleStateUpdateNone
+		if json.Unmarshal(b, &v) == nil {
+			u.None = &v
+			return nil
+		}
+	}
+	return errors.New("no matching variant for union")
+}
+func (u IdleStateUpdate) MarshalJSON() ([]byte, error) {
+	if u.EndTurn != nil {
+		_b, _e := json.Marshal(*u.EndTurn)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["stopReason"] = json.RawMessage("\"end_turn\"")
+		return json.Marshal(m)
+	}
+	if u.MaxTokens != nil {
+		_b, _e := json.Marshal(*u.MaxTokens)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["stopReason"] = json.RawMessage("\"max_tokens\"")
+		return json.Marshal(m)
+	}
+	if u.MaxTurnRequests != nil {
+		_b, _e := json.Marshal(*u.MaxTurnRequests)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["stopReason"] = json.RawMessage("\"max_turn_requests\"")
+		return json.Marshal(m)
+	}
+	if u.Refusal != nil {
+		_b, _e := json.Marshal(*u.Refusal)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["stopReason"] = json.RawMessage("\"refusal\"")
+		return json.Marshal(m)
+	}
+	if u.Cancelled != nil {
+		_b, _e := json.Marshal(*u.Cancelled)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["stopReason"] = json.RawMessage("\"cancelled\"")
+		return json.Marshal(m)
+	}
+	if u.Error != nil {
+		_b, _e := json.Marshal(*u.Error)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["stopReason"] = json.RawMessage("\"error\"")
+		return json.Marshal(m)
+	}
+	if u.Other != nil {
+		_b, _e := json.Marshal(*u.Other)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		return _b, nil
+	}
+	if u.None != nil {
+		_b, _e := json.Marshal(*u.None)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	return []byte{}, nil
+}
+
+func (u *IdleStateUpdate) Validate() error {
+	var count int
+	if u.EndTurn != nil {
+		count++
+	}
+	if u.MaxTokens != nil {
+		count++
+	}
+	if u.MaxTurnRequests != nil {
+		count++
+	}
+	if u.Refusal != nil {
+		count++
+	}
+	if u.Cancelled != nil {
+		count++
+	}
+	if u.Error != nil {
+		count++
+	}
+	if u.Other != nil {
+		count++
+	}
+	if u.None != nil {
+		count++
+	}
+	if count < 1 {
+		return errors.New("IdleStateUpdate must have at least one variant set")
+	}
+	encoded, err := json.Marshal(*u)
+	if err != nil {
+		return err
+	}
+	var decoded IdleStateUpdate
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return fmt.Errorf("IdleStateUpdate: %w", err)
+	}
+	return nil
 }
 
 // An image provided to or from an LLM.
@@ -6000,8 +6786,25 @@ func (v *InitializeResponse) UnmarshalJSON(b []byte) error {
 	}
 	type Alias InitializeResponse
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		AuthMethods json.RawMessage `json:"authMethods"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.AuthMethods, &items) == nil && items != nil {
+			a.AuthMethods = make([]AuthMethod, 0, len(items))
+			for _, item := range items {
+				var value AuthMethod
+				if json.Unmarshal(item, &value) == nil {
+					a.AuthMethods = append(a.AuthMethods, value)
+				}
+			}
+		}
 	}
 	{
 		_rm, _ok := m["capabilities"]
@@ -6265,6 +7068,71 @@ type McpServerHttpInline struct {
 	Url string `json:"url"`
 }
 
+func (v *McpServerHttpInline) UnmarshalJSON(b []byte) error {
+	*v = McpServerHttpInline{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["name"]
+		if !ok {
+			return fmt.Errorf("name is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("name must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	{
+		raw, ok := m["url"]
+		if !ok {
+			return fmt.Errorf("url is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("url must not be null")
+		}
+	}
+	{
+		raw, ok := m["headers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value HttpHeader
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	type Alias McpServerHttpInline
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = McpServerHttpInline(a)
+	return nil
+}
+
 // Stdio transport configuration
 //
 // Only available when the Agent capabilities include 'session.mcp.stdio'.
@@ -6284,6 +7152,94 @@ type McpServerStdioInline struct {
 	// Human-readable name identifying this MCP server.
 	Name string `json:"name"`
 	Type string `json:"type"`
+}
+
+func (v *McpServerStdioInline) UnmarshalJSON(b []byte) error {
+	*v = McpServerStdioInline{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["command"]
+		if !ok {
+			return fmt.Errorf("command is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("command must not be null")
+		}
+	}
+	{
+		raw, ok := m["name"]
+		if !ok {
+			return fmt.Errorf("name is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("name must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	{
+		raw, ok := m["args"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["env"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value EnvVariable
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	type Alias McpServerStdioInline
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = McpServerStdioInline(a)
+	return nil
 }
 
 // Custom or future MCP server transport configuration.
@@ -6558,6 +7514,29 @@ func (v *McpServerHttp) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("url must not be null")
 		}
 	}
+	{
+		raw, ok := m["headers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value HttpHeader
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias McpServerHttp
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
@@ -6609,6 +7588,52 @@ func (v *McpServerStdio) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("name must not be null")
 		}
 	}
+	{
+		raw, ok := m["args"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value string
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["env"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value EnvVariable
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias McpServerStdio
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
@@ -6633,7 +7658,11 @@ type McpStdioCapabilities struct {
 // An Internet media type identifying the format of protocol content.
 type MediaType string
 
-// Unique identifier for a message within a session.
+// Identifier for a message, unique among messages of the same type within a session.
+//
+// Each message type, such as user messages, agent messages, and agent thoughts,
+// has its own ID space: messages of different types may share an ID and remain
+// distinct messages.
 type MessageId string
 
 // Items for a multi-select (array) property schema.
@@ -6925,6 +7954,52 @@ func (v *NewSessionRequest) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("cwd must not be null")
 		}
 	}
+	{
+		raw, ok := m["mcpServers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value McpServer
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["additionalDirectories"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value AbsolutePath
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias NewSessionRequest
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
@@ -7003,6 +8078,96 @@ func (v *NewSessionResponse) UnmarshalJSON(b []byte) error {
 func (v *NewSessionResponse) Validate() error {
 	return nil
 }
+
+// Fire-and-forget information for the user.
+//
+// Notices are live events rather than session history. Agents must not rely on
+// a notice being received, displayed, or seen by the user.
+// No Client capability is required, and unsupported Clients may ignore notices.
+//
+// See RFD: [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
+type Notice struct {
+	// Metadata scoped to this notice.
+	//
+	// Omitted and 'null' are equivalent and mean no metadata was supplied.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Optional plain-text detail or guidance.
+	//
+	// Omitted and 'null' are equivalent and mean no description was supplied.
+	Description *string `json:"description,omitempty"`
+	// Presentation severity hint.
+	Severity NoticeSeverity `json:"severity"`
+	// Required non-empty plain-text title that can stand alone.
+	Title string `json:"title"`
+}
+
+func (v *Notice) UnmarshalJSON(b []byte) error {
+	*v = Notice{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["severity"]
+		if !ok {
+			return fmt.Errorf("severity is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("severity must not be null")
+		}
+	}
+	{
+		raw, ok := m["title"]
+		if !ok {
+			return fmt.Errorf("title is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("title must not be null")
+		}
+	}
+	{
+		if raw, ok := m["title"]; ok {
+			var value string
+			if json.Unmarshal(raw, &value) != nil || utf8.RuneCountInString(value) < 1 {
+				return fmt.Errorf("title is too short")
+			}
+		}
+	}
+	type Alias Notice
+	var a Alias
+	var raw struct {
+		Alias
+		Meta        json.RawMessage `json:"_meta"`
+		Description json.RawMessage `json:"description"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Description, &value) == nil {
+			a.Description = value
+		}
+	}
+	*v = Notice(a)
+	return nil
+}
+
+// Severity hint for a session notice.
+type NoticeSeverity string
+
+const (
+	NoticeSeverityInfo    NoticeSeverity = "info"
+	NoticeSeverityWarning NoticeSeverity = "warning"
+	NoticeSeverityError   NoticeSeverity = "error"
+)
 
 // Schema for number (floating-point) properties in an elicitation form.
 type NumberPropertySchema struct {
@@ -8724,6 +9889,52 @@ func (v *ResumeSessionRequest) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("sessionId must not be null")
 		}
 	}
+	{
+		raw, ok := m["mcpServers"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value McpServer
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	{
+		raw, ok := m["additionalDirectories"]
+		if ok {
+			if !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					return errors.New("invalid null action value")
+				}
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+						return errors.New("invalid null action value")
+					}
+					var value AbsolutePath
+					if err := json.Unmarshal(item, &value); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	type Alias ResumeSessionRequest
 	var a Alias
 	if err := json.Unmarshal(b, &a); err != nil {
@@ -9905,19 +11116,67 @@ type SessionStateUpdate struct {
 	// these keys.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta          map[string]json.RawMessage `json:"_meta,omitempty"`
-	SessionUpdate string                     `json:"sessionUpdate"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The failure, as a JSON-RPC error object.
+	//
+	// Optional. Omitted or 'null' both mean the agent is not reporting failure details.
+	// Agents SHOULD include it.
+	Error         *Error `json:"error,omitempty"`
+	SessionUpdate string `json:"sessionUpdate"`
 	// Custom or future session state.
 	//
 	// Values beginning with '_' are reserved for implementation-specific
 	// extensions. Unknown values that do not begin with '_' are reserved for
 	// future ACP variants.
 	State *string `json:"state,omitempty"`
-	// Indicates why foreground work stopped.
+	// Why foreground work stopped. The value selects one of this type's variants, which may add fields of their own.
 	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason.
-	// Agents SHOULD include this when the idle transition ends foreground work.
-	StopReason *StopReason `json:"stopReason,omitempty"`
+	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason; a malformed value is treated the same way.
+	//
+	// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#stop-reasons)
+	StopReason *string `json:"stopReason,omitempty"`
+}
+
+func (v *SessionStateUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionStateUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionStateUpdate
+	var a Alias
+	var raw struct {
+		Alias
+		StopReason json.RawMessage `json:"stopReason"`
+		Error      json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value *string
+		if json.Unmarshal(raw.StopReason, &value) == nil {
+			a.StopReason = value
+		}
+	}
+	{
+		var value *Error
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	*v = SessionStateUpdate(a)
+	return nil
 }
 
 // A chunk of tool-call content being streamed.
@@ -10283,6 +11542,382 @@ type SessionUsageUpdate struct {
 	Used uint64 `json:"used"`
 }
 
+// Information for the user that is not part of session history.
+//
+// No Client capability is required. Clients that do not understand or
+// present notices may ignore them.
+type SessionUpdateNotice struct {
+	// Metadata scoped to this notice.
+	//
+	// Omitted and 'null' are equivalent and mean no metadata was supplied.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Optional plain-text detail or guidance.
+	//
+	// Omitted and 'null' are equivalent and mean no description was supplied.
+	Description   *string `json:"description,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
+	// Presentation severity hint.
+	Severity NoticeSeverity `json:"severity"`
+	// Required non-empty plain-text title that can stand alone.
+	Title string `json:"title"`
+}
+
+func (v *SessionUpdateNotice) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateNotice{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	{
+		raw, ok := m["severity"]
+		if !ok {
+			return fmt.Errorf("severity is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("severity must not be null")
+		}
+	}
+	{
+		raw, ok := m["title"]
+		if !ok {
+			return fmt.Errorf("title is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("title must not be null")
+		}
+	}
+	{
+		if raw, ok := m["title"]; ok {
+			var value string
+			if json.Unmarshal(raw, &value) != nil || utf8.RuneCountInString(value) < 1 {
+				return fmt.Errorf("title is too short")
+			}
+		}
+	}
+	type Alias SessionUpdateNotice
+	var a Alias
+	var raw struct {
+		Alias
+		Meta        json.RawMessage `json:"_meta"`
+		Description json.RawMessage `json:"description"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Description, &value) == nil {
+			a.Description = value
+		}
+	}
+	*v = SessionUpdateNotice(a)
+	return nil
+}
+
+// A context compaction has been created or updated.
+type SessionCompactionUpdate struct {
+	// Extensible metadata patch for this compaction.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The Agent-owned ID of this compaction, unique within the session.
+	CompactionId CompactionId `json:"compactionId"`
+	// Human-readable error details for the compaction.
+	Error         *string `json:"error,omitempty"`
+	SessionUpdate string  `json:"sessionUpdate"`
+	// Current lifecycle status.
+	Status CompactionStatus `json:"status"`
+	// Complete replacement user-displayable summary content for the compaction.
+	Summary    []ContentBlock `json:"summary,omitempty"`
+	hasMeta    bool           `json:"-"`
+	hasError   bool           `json:"-"`
+	hasSummary bool           `json:"-"`
+}
+
+func (v SessionCompactionUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionCompactionUpdate
+	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _errorJSON json.RawMessage
+	if a.Error != nil {
+		encoded, err := json.Marshal(*a.Error)
+		if err != nil {
+			return nil, err
+		}
+		_errorJSON = encoded
+	} else if a.hasError {
+		_errorJSON = json.RawMessage("null")
+	}
+	var _summaryJSON json.RawMessage
+	if a.Summary != nil {
+		encoded, err := json.Marshal(a.Summary)
+		if err != nil {
+			return nil, err
+		}
+		_summaryJSON = encoded
+	} else if a.hasSummary {
+		_summaryJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Error   json.RawMessage `json:"error,omitempty"`
+		Summary json.RawMessage `json:"summary,omitempty"`
+	}{
+		Alias:   a,
+		Error:   _errorJSON,
+		Meta:    __metaJSON,
+		Summary: _summaryJSON,
+	})
+}
+
+func (v *SessionCompactionUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionCompactionUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	{
+		raw, ok := m["status"]
+		if !ok {
+			return fmt.Errorf("status is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("status must not be null")
+		}
+	}
+	type Alias SessionCompactionUpdate
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Error   json.RawMessage `json:"error"`
+		Summary json.RawMessage `json:"summary"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Summary, &items) == nil && items != nil {
+			a.Summary = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Summary = append(a.Summary, value)
+				}
+			}
+		}
+	}
+	{
+		_, present := m["_meta"]
+		a.hasMeta = present
+	}
+	{
+		_, present := m["error"]
+		a.hasError = present
+	}
+	{
+		_, present := m["summary"]
+		a.hasSummary = present
+	}
+	*v = SessionCompactionUpdate(a)
+	return nil
+}
+
+func (v SessionCompactionUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionCompactionUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionCompactionUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionCompactionUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionCompactionUpdate) ErrorState() NullableFieldState {
+	if v.Error != nil {
+		return NullableFieldValue
+	}
+	if v.hasError {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionCompactionUpdate) SetError(value string) {
+	v.Error = &value
+	v.hasError = true
+}
+
+func (v *SessionCompactionUpdate) ClearError() {
+	v.Error = nil
+	v.hasError = true
+}
+
+func (v *SessionCompactionUpdate) UnsetError() {
+	v.Error = nil
+	v.hasError = false
+}
+
+func (v SessionCompactionUpdate) SummaryState() NullableFieldState {
+	if v.Summary != nil {
+		return NullableFieldValue
+	}
+	if v.hasSummary {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionCompactionUpdate) SetSummary(value []ContentBlock) {
+	v.Summary = value
+	v.hasSummary = true
+}
+
+func (v *SessionCompactionUpdate) ClearSummary() {
+	v.Summary = nil
+	v.hasSummary = true
+}
+
+func (v *SessionCompactionUpdate) UnsetSummary() {
+	v.Summary = nil
+	v.hasSummary = false
+}
+
+// A content block appended to a context compaction's retained summary.
+type SessionUpdateCompactionSummaryChunk struct {
+	// Metadata scoped to this chunk. Omission and 'null' both mean absent.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// ID of the compaction whose summary receives this content.
+	CompactionId CompactionId `json:"compactionId"`
+	// One content block to append.
+	Content       ContentBlock `json:"content"`
+	SessionUpdate string       `json:"sessionUpdate"`
+}
+
+func (v *SessionUpdateCompactionSummaryChunk) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateCompactionSummaryChunk{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["compactionId"]
+		if !ok {
+			return fmt.Errorf("compactionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("compactionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["content"]
+		if !ok {
+			return fmt.Errorf("content is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("content must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionUpdateCompactionSummaryChunk
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = SessionUpdateCompactionSummaryChunk(a)
+	return nil
+}
+
 // Custom or future session update.
 //
 // Values beginning with '_' are reserved for implementation-specific
@@ -10340,6 +11975,15 @@ type SessionUpdate struct {
 	SessionInfoUpdate *SessionSessionInfoUpdate `json:"-"`
 	// Context window and cost update for the session.
 	UsageUpdate *SessionUsageUpdate `json:"-"`
+	// Information for the user that is not part of session history.
+	//
+	// No Client capability is required. Clients that do not understand or
+	// present notices may ignore them.
+	Notice *SessionUpdateNotice `json:"-"`
+	// A context compaction has been created or updated.
+	CompactionUpdate *SessionCompactionUpdate `json:"-"`
+	// A content block appended to a context compaction's retained summary.
+	CompactionSummaryChunk *SessionUpdateCompactionSummaryChunk `json:"-"`
 	// Custom or future session update.
 	//
 	// Values beginning with '_' are reserved for implementation-specific
@@ -11030,6 +12674,144 @@ func (u *SessionUpdate) UnmarshalJSON(b []byte) error {
 				}
 				u.UsageUpdate = &v
 				return nil
+			case "notice":
+				{
+					raw, ok := m["sessionUpdate"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["severity"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value NoticeSeverity
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["title"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v SessionUpdateNotice
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Notice = &v
+				return nil
+			case "compaction_update":
+				{
+					raw, ok := m["compactionId"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value CompactionId
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["sessionUpdate"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["status"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value CompactionStatus
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v SessionCompactionUpdate
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.CompactionUpdate = &v
+				return nil
+			case "compaction_summary_chunk":
+				{
+					raw, ok := m["compactionId"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value CompactionId
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["content"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value ContentBlock
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["sessionUpdate"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v SessionUpdateCompactionSummaryChunk
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.CompactionSummaryChunk = &v
+				return nil
 			}
 		}
 		{
@@ -11261,6 +13043,42 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 		m["sessionUpdate"] = json.RawMessage("\"usage_update\"")
 		return json.Marshal(m)
 	}
+	if u.Notice != nil {
+		_b, _e := json.Marshal(*u.Notice)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = json.RawMessage("\"notice\"")
+		return json.Marshal(m)
+	}
+	if u.CompactionUpdate != nil {
+		_b, _e := json.Marshal(*u.CompactionUpdate)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = json.RawMessage("\"compaction_update\"")
+		return json.Marshal(m)
+	}
+	if u.CompactionSummaryChunk != nil {
+		_b, _e := json.Marshal(*u.CompactionSummaryChunk)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["sessionUpdate"] = json.RawMessage("\"compaction_summary_chunk\"")
+		return json.Marshal(m)
+	}
 	if u.Other != nil {
 		_b, _e := json.Marshal(*u.Other)
 		if _e != nil {
@@ -11319,6 +13137,15 @@ func (u *SessionUpdate) Validate() error {
 		count++
 	}
 	if u.UsageUpdate != nil {
+		count++
+	}
+	if u.Notice != nil {
+		count++
+	}
+	if u.CompactionUpdate != nil {
+		count++
+	}
+	if u.CompactionSummaryChunk != nil {
 		count++
 	}
 	if u.Other != nil {
@@ -11734,13 +13561,61 @@ type StateUpdateIdle struct {
 	// these keys.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta  map[string]json.RawMessage `json:"_meta,omitempty"`
-	State string                     `json:"state"`
-	// Indicates why foreground work stopped.
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The failure, as a JSON-RPC error object.
 	//
-	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason.
-	// Agents SHOULD include this when the idle transition ends foreground work.
-	StopReason *StopReason `json:"stopReason,omitempty"`
+	// Optional. Omitted or 'null' both mean the agent is not reporting failure details.
+	// Agents SHOULD include it.
+	Error *Error `json:"error,omitempty"`
+	State string `json:"state"`
+	// Why foreground work stopped. The value selects one of this type's variants, which may add fields of their own.
+	//
+	// Optional. Omitted or 'null' both mean the agent is not reporting a stop reason; a malformed value is treated the same way.
+	//
+	// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#stop-reasons)
+	StopReason *string `json:"stopReason,omitempty"`
+}
+
+func (v *StateUpdateIdle) UnmarshalJSON(b []byte) error {
+	*v = StateUpdateIdle{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["state"]
+		if !ok {
+			return fmt.Errorf("state is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("state must not be null")
+		}
+	}
+	type Alias StateUpdateIdle
+	var a Alias
+	var raw struct {
+		Alias
+		StopReason json.RawMessage `json:"stopReason"`
+		Error      json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value *string
+		if json.Unmarshal(raw.StopReason, &value) == nil {
+			a.StopReason = value
+		}
+	}
+	{
+		var value *Error
+		if json.Unmarshal(raw.Error, &value) == nil {
+			a.Error = value
+		}
+	}
+	*v = StateUpdateIdle(a)
+	return nil
 }
 
 // Foreground work is blocked on user action.
@@ -11819,6 +13694,136 @@ func (u *StateUpdate) UnmarshalJSON(b []byte) error {
 					if json.Unmarshal(raw, &value) != nil {
 						return errors.New("invalid variant payload")
 					}
+				}
+				var anyOfMatch bool
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				{
+					match := true
+					{
+						raw, ok := m["stopReason"]
+						if !ok {
+							match = false
+						}
+						if ok {
+							var value any
+							if json.Unmarshal(raw, &value) != nil {
+								match = false
+							}
+						}
+					}
+					if match {
+						anyOfMatch = true
+					}
+				}
+				if !anyOfMatch {
+					return errors.New("invalid variant payload")
 				}
 				var v StateUpdateIdle
 				if json.Unmarshal(b, &v) != nil {
@@ -11958,19 +13963,6 @@ func (u *StateUpdate) Validate() error {
 	}
 	return nil
 }
-
-// Reasons why an agent stops active session work.
-//
-// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#stop-reasons)
-type StopReason string
-
-const (
-	StopReasonEndTurn         StopReason = "end_turn"
-	StopReasonMaxTokens       StopReason = "max_tokens"
-	StopReasonMaxTurnRequests StopReason = "max_turn_requests"
-	StopReasonRefusal         StopReason = "refusal"
-	StopReasonCancelled       StopReason = "cancelled"
-)
 
 // String format types for string properties in elicitation schemas.
 type StringFormat string

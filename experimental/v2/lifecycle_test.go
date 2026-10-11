@@ -62,7 +62,7 @@ func (a *loopbackAgent) Prompt(ctx context.Context, params PromptRequest) (Promp
 		}
 		return a.conn.SessionUpdate(ctx, UpdateSessionNotification{
 			SessionId: params.SessionId,
-			Update:    IdleUpdate(StopReasonEndTurn),
+			Update:    IdleUpdate("end_turn"),
 		})
 	}); err != nil {
 		return PromptResponse{}, err
@@ -168,7 +168,7 @@ func testV2PromptInsertion(t *testing.T, echoBefore bool) {
 	if clientImpl.updates[2].StateUpdate == nil || *clientImpl.updates[2].StateUpdate.State != "idle" {
 		t.Fatalf("third update = %#v", clientImpl.updates[2].StateUpdate)
 	}
-	if clientImpl.updates[2].StateUpdate.StopReason == nil || *clientImpl.updates[2].StateUpdate.StopReason != StopReasonEndTurn {
+	if clientImpl.updates[2].StateUpdate.StopReason == nil || *clientImpl.updates[2].StateUpdate.StopReason != "end_turn" {
 		t.Fatalf("idle stopReason = %#v", clientImpl.updates[2].StateUpdate.StopReason)
 	}
 }
@@ -244,7 +244,7 @@ func TestStateUpdateJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(encoded, &again); err != nil {
 		t.Fatal(err)
 	}
-	if again.Update.StateUpdate == nil || *again.Update.StateUpdate.StopReason != StopReasonEndTurn {
+	if again.Update.StateUpdate == nil || *again.Update.StateUpdate.StopReason != "end_turn" {
 		t.Fatalf("round-trip %#v", again.Update.StateUpdate)
 	}
 }

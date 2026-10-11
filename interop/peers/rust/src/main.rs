@@ -5,15 +5,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, CancelNotification, ContentBlock, ContentChunk, InitializeRequest,
-    InitializeResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
+    AgentCapabilities, CancelNotification, ClientCapabilities, ClientSessionCapabilities,
+    CompactionCapabilities, CompactionStatus, CompactionSummaryChunk, CompactionUpdate,
+    ContentBlock, ContentChunk, InitializeRequest, InitializeResponse, Meta, NewSessionRequest,
+    NewSessionResponse, Notice, NoticeCapabilities, NoticeSeverity, PermissionOption,
     PermissionOptionKind, PromptRequest, PromptResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
     SessionNotification, SessionUpdate, StopReason, TextContent, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };
+use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
 use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Responder, Stdio,
 };
@@ -182,6 +184,78 @@ fn send_update(
     ))
 }
 
+fn send_display_updates(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+) -> Result<(), agent_client_protocol::Error> {
+    for update in [
+        SessionUpdate::Notice(Notice::new(NoticeSeverity::Warning, "Interop notice")),
+        SessionUpdate::CompactionUpdate(CompactionUpdate::new(
+            "interop-compaction",
+            CompactionStatus::InProgress,
+        )),
+        SessionUpdate::CompactionSummaryChunk(CompactionSummaryChunk::new(
+            "interop-compaction",
+            ContentBlock::Text(TextContent::new("Retained summary")),
+        )),
+        SessionUpdate::CompactionUpdate(
+            CompactionUpdate::new("interop-compaction", CompactionStatus::Completed)
+                .summary(Vec::<ContentBlock>::new())
+                .error(MaybeUndefined::<String>::Null)
+                .meta(MaybeUndefined::<Meta>::Null),
+        ),
+    ] {
+        connection.send_notification(SessionNotification::new(session_id.clone(), update))?;
+    }
+    Ok(())
+}
+
+fn update_event(
+    notification: &SessionNotification,
+) -> Result<Option<String>, agent_client_protocol::Error> {
+    let event = match &notification.update {
+        SessionUpdate::Notice(notice) => {
+            let severity = serde_json::to_value(&notice.severity)?;
+            Some(format!(
+                "notice:{}:{}",
+                severity.as_str().unwrap_or_default(),
+                notice.title
+            ))
+        }
+        SessionUpdate::CompactionSummaryChunk(chunk) => match &chunk.content {
+            ContentBlock::Text(text) => {
+                Some(format!("summary:{}:{}", chunk.compaction_id, text.text))
+            }
+            _ => None,
+        },
+        SessionUpdate::CompactionUpdate(patch) => {
+            let fields = serde_json::to_value(patch)?;
+            let (status, state) = if patch.status == CompactionStatus::InProgress
+                && fields.get("summary").is_none()
+                && fields.get("error").is_none()
+                && fields.get("_meta").is_none()
+            {
+                ("in_progress", "absent")
+            } else if patch.status == CompactionStatus::Completed
+                && fields["summary"] == serde_json::json!([])
+                && fields.get("error") == Some(&serde_json::Value::Null)
+                && fields.get("_meta") == Some(&serde_json::Value::Null)
+            {
+                ("completed", "cleared")
+            } else {
+                return Err(agent_client_protocol::Error::internal_error()
+                    .data("compaction patch state lost"));
+            };
+            Some(format!(
+                "compaction:{}:{status}:{state}",
+                patch.compaction_id
+            ))
+        }
+        _ => update_text(notification).map(|text| format!("update:{text}")),
+    };
+    Ok(event)
+}
+
 async fn wait_for_event(
     events: &Arc<Mutex<Vec<String>>>,
     expected: &str,
@@ -216,6 +290,12 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
             async move |request: InitializeRequest,
                         responder: Responder<InitializeResponse>,
                         _connection| {
+                let Some(session) = request.client_capabilities.session.as_ref() else {
+                    return Err(agent_client_protocol::Error::invalid_params());
+                };
+                if session.compaction.is_none() || session.notices.is_none() {
+                    return Err(agent_client_protocol::Error::invalid_params());
+                }
                 responder.respond(
                     InitializeResponse::new(request.protocol_version)
                         .agent_capabilities(AgentCapabilities::new()),
@@ -286,6 +366,7 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
                                             )));
                                     }
                                 }
+                                send_display_updates(&connection, &session_id)?;
                                 send_update(&connection, &session_id, "core-3")?;
                                 responder.respond(PromptResponse::new(StopReason::EndTurn))
                             }
@@ -381,11 +462,8 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
             {
                 let events = Arc::clone(&events);
                 async move |notification: SessionNotification, _connection| {
-                    if let Some(text) = update_text(&notification) {
-                        events
-                            .lock()
-                            .expect("events mutex poisoned")
-                            .push(format!("update:{text}"));
+                    if let Some(event) = update_event(&notification)? {
+                        events.lock().expect("events mutex poisoned").push(event);
                     }
                     Ok(())
                 }
@@ -423,7 +501,15 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
             let events = Arc::clone(&events);
             async move |connection: ConnectionTo<Agent>| {
                 let initialized = connection
-                    .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .send_request(
+                        InitializeRequest::new(ProtocolVersion::V1).client_capabilities(
+                            ClientCapabilities::new().session(
+                                ClientSessionCapabilities::new()
+                                    .compaction(CompactionCapabilities::new())
+                                    .notices(NoticeCapabilities::new()),
+                            ),
+                        ),
+                    )
                     .block_task()
                     .await?;
                 let capabilities_unsupported = !initialized.agent_capabilities.load_session
