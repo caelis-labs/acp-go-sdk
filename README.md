@@ -29,7 +29,7 @@ Requires **Go 1.23 or later**.
 
 <!-- x-release-please-start-version -->
 ~~~bash
-go get github.com/caelis-labs/acp-go-sdk@v1.4.1
+go get github.com/caelis-labs/acp-go-sdk@v1.5.0
 ~~~
 <!-- x-release-please-end -->
 
