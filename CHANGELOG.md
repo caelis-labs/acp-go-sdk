@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.5.1](https://github.com/caelis-labs/acp-go-sdk/compare/v1.5.0...v1.5.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **protocol:** align schema 1.26.0 and official SDK peers ([#26](https://github.com/caelis-labs/acp-go-sdk/issues/26)) ([a19e71f](https://github.com/caelis-labs/acp-go-sdk/commit/a19e71feb72ac98c47c83a4704999c034fe9864a)), closes [#25](https://github.com/caelis-labs/acp-go-sdk/issues/25)
+
 ## [1.5.0](https://github.com/caelis-labs/acp-go-sdk/compare/v1.4.1...v1.5.0) (2026-10-11)
 
 
