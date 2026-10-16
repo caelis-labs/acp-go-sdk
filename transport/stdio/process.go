@@ -95,11 +95,14 @@ func Start(ctx context.Context, command Command) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Own the read end independently of Cmd.Wait: StdoutPipe would let the
+	// internal waiter close it before callers consume a fast peer's output.
+	stdout, childStdout, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		return nil, err
 	}
+	cmd.Stdout = childStdout
 	process := &Process{
 		cmd:         cmd,
 		stdin:       stdin,
@@ -117,10 +120,12 @@ func Start(ctx context.Context, command Command) (*Process, error) {
 		go func() { _ = process.forceStop() }()
 		return nil
 	}
-	if err := cmd.Start(); err != nil {
+	startErr := cmd.Start()
+	_ = childStdout.Close()
+	if startErr != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
-		return nil, err
+		return nil, startErr
 	}
 	tree, err := attachProcessTree(cmd, process.processDone)
 	if err != nil {
@@ -150,7 +155,8 @@ func (p *Process) installTree(tree processTree) {
 // Input is the child's protocol stdin.
 func (p *Process) Input() io.WriteCloser { return p.stdin }
 
-// Output is the child's protocol stdout.
+// Output is the child's protocol stdout. It remains readable after Wait until
+// Close or Shutdown closes the process-owned read end.
 func (p *Process) Output() io.ReadCloser { return p.stdout }
 
 // Wait waits for the child process to exit.

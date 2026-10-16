@@ -32,6 +32,10 @@ initialize, new-session or prompt request returns `-32602` before the handler.
 Invalid scalar and array payloads remain errors. This normalization does not
 change raw `Connection` handlers or notification dispatch.
 
+Subprocess stdout also remains readable after `Process.Wait` until explicit
+`Close` or `Shutdown`. The internal waiter owns process reaping without closing
+the application's read end, so a fast peer's final protocol frames are retained.
+
 ## Isolated experimental v2 changes
 
 The alpha.9 schema removes `file` and `markdown` from the exclusion list of the

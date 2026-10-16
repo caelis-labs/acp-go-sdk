@@ -333,3 +333,29 @@ func TestStartDrainsStderrAndWaitIsRepeatable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProcessOutputRemainsReadableAfterWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	process, err := Start(ctx, Command{
+		Executable: os.Args[0],
+		Args:       []string{"-test.run=^TestProcessHelper$"},
+		Env:        append(os.Environ(), "ACP_STDIO_HELPER=1"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = process.Close() }()
+	// Wait must reap a fast peer without closing the application's read end
+	// before it has consumed the peer's final protocol frames.
+	if err := process.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	protocol, err := io.ReadAll(process.Output())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(protocol), "{\"jsonrpc\":\"2.0\",\"method\":\"ready\"}\n"; got != want {
+		t.Fatalf("protocol stdout = %q, want %q", got, want)
+	}
+}
