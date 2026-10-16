@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,7 +86,14 @@ func (c *AgentSideConnection) RequestPermission(ctx context.Context, params Requ
 }
 
 func (c *ClientSideConnection) Initialize(ctx context.Context, params InitializeRequest) (InitializeResponse, error) {
-	return acp.SendRequest[InitializeResponse](c.conn, ctx, AgentMethodInitialize, params)
+	response, err := acp.SendRequest[InitializeResponse](c.conn, ctx, AgentMethodInitialize, params)
+	if err != nil {
+		return InitializeResponse{}, err
+	}
+	if response.ProtocolVersion != ProtocolVersionNumber {
+		return InitializeResponse{}, acp.NewInvalidParams(map[string]any{"error": "agent selected an unsupported protocol version", "protocolVersion": response.ProtocolVersion})
+	}
+	return response, nil
 }
 
 func (c *ClientSideConnection) NewSession(ctx context.Context, params NewSessionRequest) (NewSessionResponse, error) {
@@ -146,9 +154,11 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if reqErr != nil {
 			return nil, reqErr
 		}
-		if _, err := SelectProtocolVersion(req.ProtocolVersion); err != nil {
+		selected, err := SelectProtocolVersion(req.ProtocolVersion)
+		if err != nil {
 			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 		}
+		req.ProtocolVersion = selected
 		resp, err := a.agent.Initialize(ctx, req)
 		if err != nil {
 			return nil, toRequestError(err)
@@ -381,6 +391,9 @@ type validator interface {
 
 func decodeParams[T any](params json.RawMessage) (T, *acp.RequestError) {
 	var value T
+	if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+		params = json.RawMessage(`{}`)
+	}
 	if err := json.Unmarshal(params, &value); err != nil {
 		return value, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}

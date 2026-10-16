@@ -161,18 +161,18 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "1.8.0" ||
-		locked.TypeScript.Tag != "v1.8.0" ||
-		locked.TypeScript.Commit != "f4ea219505fcafcb3fa63e00f1c24559755c4b6b" ||
-		locked.TypeScript.Integrity != "sha512-fbP7qHZsFyTJVT0/RPrcWJ8An26qLXHEuGCHHEKDyxD1xpXV+Ejyh2LAE6vBAFePkpVjZeeohnbgvuEhZ7wLMg==" {
+		locked.TypeScript.Version != "1.9.0" ||
+		locked.TypeScript.Tag != "v1.9.0" ||
+		locked.TypeScript.Commit != "1db4d43286d993545e729376346b7f9098748159" ||
+		locked.TypeScript.Integrity != "sha512-saCOTPYBK1iqWqJFAYHXbg3+zCoFXyZZFoqQAwdTWkbrZZPpAETr80QOnYr2l+dzPwL0jpNhn3eDY8MoEIDbUA==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "3.3.0" ||
-		locked.Rust.Tag != "v3.3.0" ||
-		locked.Rust.Commit != "199532c7433f1aec207dd0cada299901a5621ece" ||
-		locked.Rust.Checksum != "02898d848a20eb09b8a392e85bb3a4c79dba01d369758185d102b001362a60da" ||
+		locked.Rust.Version != "3.4.0" ||
+		locked.Rust.Tag != "v3.4.0" ||
+		locked.Rust.Commit != "4f82aef0e7559a50c2b95aff4f7ba60af10d9e04" ||
+		locked.Rust.Checksum != "72adac0ce6b0d0390df9b7a498392b24ebcf9c65c3451e5d618d936f50256289" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}
@@ -255,6 +255,41 @@ func peers(t *testing.T) []peerSpec {
 	}
 }
 
+func runGoEmptyPayloadProbes(t *testing.T, peer peerSpec) {
+	t.Helper()
+	command, err := peer.agent("core", filepath.Join(t.TempDir(), "unused.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	process, err := stdio.Start(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = process.Close() }()
+	conn := acp.NewConnection(nil, process.Input(), process.Output())
+	defer func() { _ = conn.Close() }()
+	response, err := acp.SendRequest[acp.InitializeResponse](conn, ctx, "initialize", acp.InitializeRequest{
+		ProtocolVersion:    1,
+		ClientCapabilities: acp.ClientCapabilities{Session: &acp.ClientSessionCapabilities{Compaction: &acp.CompactionCapabilities{}, Notices: &acp.NoticeCapabilities{}}},
+	})
+	if err != nil || response.AgentCapabilities.SessionCapabilities.List == nil {
+		t.Fatalf("%s probe initialize: %+v %v", peer.name, response, err)
+	}
+	for _, params := range []any{nil, json.RawMessage(`null`), json.RawMessage(`{}`)} {
+		listed, err := acp.SendRequest[acp.ListSessionsResponse](conn, ctx, "session/list", params)
+		if err != nil || len(listed.Sessions) != 0 {
+			t.Fatalf("%s list(%v): %+v %v", peer.name, params, listed, err)
+		}
+		_, err = acp.SendRequest[acp.NewSessionResponse](conn, ctx, "session/new", params)
+		var reqErr *acp.RequestError
+		if !errors.As(err, &reqErr) || reqErr.Code != -32602 {
+			t.Fatalf("%s new(%v): %v, want invalid params", peer.name, params, err)
+		}
+	}
+}
+
 func runGoClientScenario(t *testing.T, peer peerSpec, scenario string) {
 	t.Helper()
 	resultPath := filepath.Join(t.TempDir(), "agent-result.json")
@@ -309,6 +344,8 @@ func runGoClientScenario(t *testing.T, peer peerSpec, scenario string) {
 
 	switch scenario {
 	case "core":
+		runGoEmptyPayloadProbes(t, peer)
+		client.append("empty-params:ok")
 		response, err := process.Connection.Prompt(processContext, request)
 		if err != nil {
 			t.Fatalf("core prompt to %s agent: %v\nstderr:\n%s", peer.name, err, stderr.String())
@@ -558,7 +595,7 @@ func assertScenarioEvents(t *testing.T, scenario string, got []string) {
 			}
 			positions[event] = index
 		}
-		wantEvents := []string{"update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3", "response:end_turn"}
+		wantEvents := []string{"empty-params:ok", "update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3", "response:end_turn"}
 		if len(got) != len(wantEvents) {
 			t.Fatalf("core events = %v, want exactly %v", got, wantEvents)
 		}

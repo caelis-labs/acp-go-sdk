@@ -70,6 +70,10 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 
 	var result []nullablePresenceProp
 	recovery := displayRecoveryProperties(&load.Definition{Properties: properties})
+	// Alpha.9 explicitly identifies entity upserts through their metadata
+	// patch contract. Every optional nullable field on these objects needs
+	// presence tracking, including message replacement content and terminals.
+	metaPatch := metadataPatchObject(properties)
 	for _, propertyName := range keys {
 		definition := properties[propertyName]
 		if _, ok := required[propertyName]; ok || !includesNull(definition) {
@@ -78,7 +82,7 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 		description := strings.ToLower(definition.Description)
 		compactionPatch := properties["compactionId"] != nil && properties["status"] != nil &&
 			(propertyName == "summary" || propertyName == "error" || propertyName == "_meta")
-		if !compactionPatch && !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
+		if !metaPatch && !compactionPatch && !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
 			continue
 		}
 		fieldName := util.ToExportedField(propertyName)
@@ -92,6 +96,15 @@ func nullablePresenceProperties(properties map[string]*load.Definition, required
 		})
 	}
 	return result
+}
+
+func metadataPatchObject(properties map[string]*load.Definition) bool {
+	meta := properties["_meta"]
+	if meta == nil {
+		return false
+	}
+	description := strings.Join(strings.Fields(strings.ToLower(meta.Description)), " ")
+	return strings.Contains(description, "object patches the stored metadata by top-level key")
 }
 
 func appendNullablePresenceFields(fields []Code, properties []nullablePresenceProp) []Code {
@@ -159,6 +172,12 @@ func emitNullablePresenceAccessors(f *File, name string, properties []nullablePr
 		value := Id("value")
 		if property.indirect {
 			valueType = primitiveJenType(property.definition)
+			for _, branch := range property.definition.AnyOf {
+				if branch != nil && ir.PrimaryType(branch) != "null" {
+					valueType = jenTypeFor(branch)
+					break
+				}
+			}
 			value = Op("&").Id("value")
 		}
 		f.Func().Params(Id("v").Op("*").Id(name)).Id("Set"+property.fieldName).Params(Id("value").Add(valueType)).Block(

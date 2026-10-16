@@ -26,8 +26,13 @@ func (*interopAgent) Initialize(_ context.Context, request acp.InitializeRequest
 			Name:    "go-interop-agent",
 			Version: "0.0.0",
 		},
-		ProtocolVersion: request.ProtocolVersion,
+		ProtocolVersion:   request.ProtocolVersion,
+		AgentCapabilities: acp.AgentCapabilities{SessionCapabilities: acp.SessionCapabilities{List: &acp.SessionListCapabilities{}}},
 	}, nil
+}
+
+func (*interopAgent) ListSessions(context.Context, acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
 }
 
 func (a *interopAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {

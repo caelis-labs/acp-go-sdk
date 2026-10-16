@@ -52,8 +52,9 @@ type AgentCapabilities struct {
 	//
 	// Optional. Omitted or 'null' both mean the agent does not support the
 	// 'session/*' method surface. Supplying '{}' means the agent supports the
-	// baseline session methods: 'session/new', 'session/prompt',
-	// 'session/cancel', and 'session/update'.
+	// baseline session methods: 'session/new', 'session/list',
+	// 'session/resume', 'session/close', 'session/prompt', 'session/cancel',
+	// and 'session/update'.
 	Session *SessionCapabilities `json:"session,omitempty"`
 }
 
@@ -72,15 +73,55 @@ type AgentCapabilities struct {
 // content.
 type AgentMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys. Omitted means no metadata update; 'null' is an explicit clear signal.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Complete replacement content for this message.
 	Content []ContentBlock `json:"content,omitempty"`
 	// A unique identifier for the message.
-	MessageId MessageId `json:"messageId"`
+	MessageId  MessageId `json:"messageId"`
+	hasMeta    bool      `json:"-"`
+	hasContent bool      `json:"-"`
+}
+
+func (v AgentMessage) MarshalJSON() ([]byte, error) {
+	type Alias AgentMessage
+	var a Alias
+	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+	}{
+		Alias:   a,
+		Content: _contentJSON,
+		Meta:    __metaJSON,
+	})
 }
 
 func (v *AgentMessage) UnmarshalJSON(b []byte) error {
@@ -100,11 +141,93 @@ func (v *AgentMessage) UnmarshalJSON(b []byte) error {
 	}
 	type Alias AgentMessage
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = AgentMessage(a)
 	return nil
+}
+
+func (v AgentMessage) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *AgentMessage) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *AgentMessage) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *AgentMessage) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v AgentMessage) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *AgentMessage) SetContent(value []ContentBlock) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *AgentMessage) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *AgentMessage) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
 }
 
 // A JSON-RPC notification object.
@@ -367,15 +490,55 @@ func (u *AgentResponse) Validate() error {
 // content.
 type AgentThought struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys. Omitted means no metadata update; 'null' is an explicit clear signal.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Complete replacement content for this thought message.
 	Content []ContentBlock `json:"content,omitempty"`
 	// A unique identifier for the thought message.
-	MessageId MessageId `json:"messageId"`
+	MessageId  MessageId `json:"messageId"`
+	hasMeta    bool      `json:"-"`
+	hasContent bool      `json:"-"`
+}
+
+func (v AgentThought) MarshalJSON() ([]byte, error) {
+	type Alias AgentThought
+	var a Alias
+	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+	}{
+		Alias:   a,
+		Content: _contentJSON,
+		Meta:    __metaJSON,
+	})
 }
 
 func (v *AgentThought) UnmarshalJSON(b []byte) error {
@@ -395,11 +558,93 @@ func (v *AgentThought) UnmarshalJSON(b []byte) error {
 	}
 	type Alias AgentThought
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = AgentThought(a)
 	return nil
+}
+
+func (v AgentThought) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *AgentThought) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *AgentThought) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *AgentThought) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v AgentThought) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *AgentThought) SetContent(value []ContentBlock) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *AgentThought) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *AgentThought) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
 }
 
 // Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
@@ -1600,6 +1845,17 @@ func (u *ClientResponse) Validate() error {
 // The agent **must** cancel any ongoing work related to the session (treat it
 // as if 'session/cancel' was called) and then free up any resources associated
 // with the session.
+//
+// When closing cancels active foreground work, the Agent MUST send the final
+// updates for that work and the idle 'state_update' with 'stopReason: "cancelled"'
+// before responding successfully to 'session/close'. Closing an idle session
+// does not itself require another idle update.
+//
+// Closing may also cancel pending 'session/prompt' requests, including queued
+// prompts. If closing prevents a prompt's user message from being inserted, the
+// Agent MUST answer that request with '-32800' (Request Cancelled). If the message
+// has already been inserted, the Agent MUST respond successfully with its
+// 'messageId'. Prompt responses need not precede the close response.
 type CloseSessionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -1777,9 +2033,17 @@ func (v *CompactionSummaryChunk) UnmarshalJSON(b []byte) error {
 //
 // 'summary', 'error', and '_meta' have patch semantics: omission leaves the
 // stored value unchanged, 'null' clears it, and a concrete value replaces it.
-// 'summary: []' also clears the summary.
+// 'summary: []' also clears the summary. A concrete '_meta' object patches the
+// stored metadata by top-level key instead of replacing it.
 type CompactionUpdate struct {
-	// Extensible metadata patch for this compaction.
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
+	//
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The Agent-owned ID of this compaction, unique within the session.
 	CompactionId CompactionId `json:"compactionId"`
@@ -1993,6 +2257,8 @@ func (v *CompactionUpdate) UnsetSummary() {
 }
 
 // Notification sent by the agent when a URL-based elicitation is complete.
+//
+// This notification is not a foreground state update.
 type CompleteElicitationNotification struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -2733,6 +2999,18 @@ func (v *Cost) UnmarshalJSON(b []byte) error {
 // The agent sends this to the client to request information from the user,
 // either via a form or by directing them to a URL.
 // Elicitations are tied to a session (optionally a tool call) or a request.
+//
+// A session-scoped request follows the aggregate foreground-state contract:
+// agents SHOULD report 'requires_action' when the whole foreground workflow is
+// blocked on user action. Once reported, they MUST report 'running' when progress
+// resumes, or 'idle' if work ends without resuming. Independent background requests
+// and request-scoped elicitations do not themselves change session state.
+// Accepting a URL does not mean the external interaction completed.
+//
+// Agents SHOULD cancel pending elicitations no longer needed by cancelled work.
+// The request's scope alone does not establish that dependency.
+//
+// See protocol docs: [Elicitation](https://agentclientprotocol.com/protocol/v2/elicitation)
 // Form-based elicitation where the client renders a form from the provided schema.
 type CreateElicitationForm struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -6040,12 +6318,16 @@ const (
 	IconThemeDark  IconTheme = "dark"
 )
 
-// The agent is ready to process a new prompt.
+// No foreground work is active. Background activity may continue.
 //
 // Agents SHOULD include a 'stopReason' when the idle transition ends foreground
-// work. An omitted, 'null', or malformed 'stopReason' means the agent is not
+// work. An idle update that does not end foreground work need not include one.
+// Receivers treat an omitted, 'null', or malformed 'stopReason' as the agent not
 // reporting one.
+// Repeated or resume snapshots may carry the last stop reason for context.
+// They MUST NOT be counted as new completions, cancellations, or additional usage.
 // The active work ended successfully.
+// Includes locally handled commands that required no model call.
 type IdleStateUpdateEndTurn struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -6094,9 +6376,10 @@ type IdleStateUpdateRefusal struct {
 
 // Active session work was cancelled by the client via 'session/cancel'.
 //
-// Agents should report this stop reason on an idle 'state_update' session update
-// when cancellation succeeds, even if cancellation causes exceptions in
-// underlying operations.
+// Agents MUST report this stop reason on an idle 'state_update' when
+// cancellation ends active foreground work, even if aborting causes
+// exceptions. Agents MUST catch these errors and report 'cancelled', not
+// 'error'.
 type IdleStateUpdateCancelled struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -6109,8 +6392,9 @@ type IdleStateUpdateCancelled struct {
 
 // The active work ended because something failed.
 //
-// For work started by a prompt, this covers failures after the user message
-// was inserted; earlier failures are an error response to 'session/prompt'.
+// This includes pre-insertion foreground work. A prompt failure before
+// insertion also requires an error response to 'session/prompt'; after
+// insertion, the prompt's response remains successful.
 type IdleStateUpdateError struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -6203,6 +6487,7 @@ func (v *IdleStateUpdateNone) UnmarshalJSON(b []byte) error {
 
 type IdleStateUpdate struct {
 	// The active work ended successfully.
+	// Includes locally handled commands that required no model call.
 	EndTurn *IdleStateUpdateEndTurn `json:"-"`
 	// The active work ended because the agent reached the maximum number of tokens.
 	MaxTokens *IdleStateUpdateMaxTokens `json:"-"`
@@ -6215,14 +6500,16 @@ type IdleStateUpdate struct {
 	Refusal *IdleStateUpdateRefusal `json:"-"`
 	// Active session work was cancelled by the client via 'session/cancel'.
 	//
-	// Agents should report this stop reason on an idle 'state_update' session update
-	// when cancellation succeeds, even if cancellation causes exceptions in
-	// underlying operations.
+	// Agents MUST report this stop reason on an idle 'state_update' when
+	// cancellation ends active foreground work, even if aborting causes
+	// exceptions. Agents MUST catch these errors and report 'cancelled', not
+	// 'error'.
 	Cancelled *IdleStateUpdateCancelled `json:"-"`
 	// The active work ended because something failed.
 	//
-	// For work started by a prompt, this covers failures after the user message
-	// was inserted; earlier failures are an error response to 'session/prompt'.
+	// This includes pre-insertion foreground work. A prompt failure before
+	// insertion also requires an error response to 'session/prompt'; after
+	// insertion, the prompt's response remains successful.
 	Error *IdleStateUpdateError `json:"-"`
 	// Custom or future stop reason.
 	//
@@ -8015,6 +8302,10 @@ func (v *NewSessionRequest) Validate() error {
 
 // Response from creating a new session.
 //
+// New sessions default to 'idle' until a state update reports otherwise.
+// Updates may arrive before or after this response. Clients MUST NOT overwrite
+// an already-reported state when the response arrives.
+//
 // See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/v2/session-setup#creating-a-session)
 type NewSessionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -8807,6 +9098,9 @@ func (v *PromptRequest) Validate() error {
 // agent has finished processing it.
 // Processing and completion are reported through 'state_update' session updates.
 //
+// Insertion is the logical addition of a user message with a message ID and a position
+// relative to other messages in the ACP conversation.
+//
 // See protocol docs: [Prompt Accepted](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#2-prompt-accepted)
 type PromptResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -8915,9 +9209,10 @@ type ReplayFromStartInline struct {
 // extensions. Unknown values that do not begin with '_' are reserved for
 // future ACP variants.
 //
-// Receivers that do not understand this cursor should preserve the raw
-// payload when storing, replaying, proxying, or forwarding requests, and
-// otherwise reject the request rather than guessing where to replay from.
+// Intermediaries SHOULD preserve the raw payload when storing, replaying,
+// proxying, or forwarding requests. Agents that do not support this cursor
+// MUST reject the request with '-32602' (Invalid params), rather than
+// substituting another cursor or resuming without replay.
 type ReplayFromOther = json.RawMessage
 
 type ReplayFrom struct {
@@ -8929,9 +9224,10 @@ type ReplayFrom struct {
 	// extensions. Unknown values that do not begin with '_' are reserved for
 	// future ACP variants.
 	//
-	// Receivers that do not understand this cursor should preserve the raw
-	// payload when storing, replaying, proxying, or forwarding requests, and
-	// otherwise reject the request rather than guessing where to replay from.
+	// Intermediaries SHOULD preserve the raw payload when storing, replaying,
+	// proxying, or forwarding requests. Agents that do not support this cursor
+	// MUST reject the request with '-32602' (Invalid params), rather than
+	// substituting another cursor or resuming without replay.
 	Other *ReplayFromOther `json:"-"`
 }
 
@@ -9175,7 +9471,8 @@ func (u *RequestId) Validate() error {
 //
 // When a client sends a 'session/cancel' notification to cancel active
 // session work, it MUST respond to all pending 'session/request_permission'
-// requests with this 'Cancelled' outcome.
+// requests in that session with this 'Cancelled' outcome, without answering
+// any request twice. Requests in other sessions are unaffected.
 //
 // See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#cancellation)
 type RequestPermissionOutcomeCancelled struct {
@@ -9212,7 +9509,8 @@ type RequestPermissionOutcome struct {
 	//
 	// When a client sends a 'session/cancel' notification to cancel active
 	// session work, it MUST respond to all pending 'session/request_permission'
-	// requests with this 'Cancelled' outcome.
+	// requests in that session with this 'Cancelled' outcome, without answering
+	// any request twice. Requests in other sessions are unaffected.
 	//
 	// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#cancellation)
 	Cancelled *RequestPermissionOutcomeCancelled `json:"-"`
@@ -9762,7 +10060,14 @@ func (u *RequestPermissionSubject) Validate() error {
 	return nil
 }
 
-// Foreground work is blocked on user action.
+// The foreground workflow as a whole is blocked on user action.
+//
+// Agents SHOULD report this state when foreground work cannot progress without
+// user action. Pending permissions or elicitations alone do not imply this
+// state if other foreground work can progress, or if the requests belong only
+// to independent background activity. Once reported, agents MUST report
+// 'running' when progress resumes, or 'idle' if the work ends without resuming.
+// Responding to one request does not itself imply 'running'.
 type RequiresActionStateUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -9860,6 +10165,10 @@ type ResumeSessionRequest struct {
 	// replay includes the position identified by the cursor. Supplying
 	// '{ "type": "start" }' means the Agent should replay all retained
 	// conversation history before responding.
+	//
+	// Agents MUST reject unsupported cursor types or malformed cursor values
+	// with '-32602' (Invalid params), rather than substituting another cursor
+	// or resuming without replay.
 	ReplayFrom *ReplayFrom `json:"replayFrom,omitempty"`
 	// The ID of the session to resume.
 	SessionId SessionId `json:"sessionId"`
@@ -9949,6 +10258,12 @@ func (v *ResumeSessionRequest) Validate() error {
 }
 
 // Response from resuming an existing session.
+//
+// The agent MUST send a current 'state_update' after any requested history
+// replay and before this response, even without replay. The update reports
+// foreground state after resuming. The response alone does not imply 'idle'.
+//
+// See protocol docs: [Current-State Synchronization](https://agentclientprotocol.com/protocol/v2/session-setup#current-state-synchronization)
 type ResumeSessionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -10866,18 +11181,23 @@ func (v *SessionInfo) UnmarshalJSON(b []byte) error {
 // This allows clients to display dynamic session names and track session state changes.
 //
 // Omitted fields leave the existing session info unchanged. 'null' clears the
-// corresponding value.
+// corresponding value. A concrete '_meta' object patches the stored metadata by
+// top-level key.
 type SessionInfoUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted means no metadata update; 'null' is an
-	// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Human-readable title for the session. Set to null to clear.
 	Title *string `json:"title,omitempty"`
 	// RFC 3339 timestamp of last activity. Set to null to clear.
 	UpdatedAt    *string `json:"updatedAt,omitempty"`
+	hasMeta      bool    `json:"-"`
 	hasTitle     bool    `json:"-"`
 	hasUpdatedAt bool    `json:"-"`
 }
@@ -10886,6 +11206,16 @@ func (v SessionInfoUpdate) MarshalJSON() ([]byte, error) {
 	type Alias SessionInfoUpdate
 	var a Alias
 	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
 	var _titleJSON json.RawMessage
 	if a.Title != nil {
 		encoded, err := json.Marshal(*a.Title)
@@ -10908,10 +11238,12 @@ func (v SessionInfoUpdate) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		Alias
+		Meta      json.RawMessage `json:"_meta,omitempty"`
 		Title     json.RawMessage `json:"title,omitempty"`
 		UpdatedAt json.RawMessage `json:"updatedAt,omitempty"`
 	}{
 		Alias:     a,
+		Meta:      __metaJSON,
 		Title:     _titleJSON,
 		UpdatedAt: _updatedAtJSON,
 	})
@@ -10925,19 +11257,73 @@ func (v *SessionInfoUpdate) UnmarshalJSON(b []byte) error {
 	}
 	type Alias SessionInfoUpdate
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta      json.RawMessage `json:"_meta"`
+		Title     json.RawMessage `json:"title"`
+		UpdatedAt json.RawMessage `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
+	a = raw.Alias
 	{
-		_, present := m["title"]
-		a.hasTitle = present
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
 	}
 	{
-		_, present := m["updatedAt"]
-		a.hasUpdatedAt = present
+		var value *string
+		if json.Unmarshal(raw.Title, &value) == nil {
+			a.Title = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.UpdatedAt, &value) == nil {
+			a.UpdatedAt = value
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["title"]
+		a.hasTitle = present && (a.Title != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["updatedAt"]
+		a.hasUpdatedAt = present && (a.UpdatedAt != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = SessionInfoUpdate(a)
 	return nil
+}
+
+func (v SessionInfoUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionInfoUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionInfoUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionInfoUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
 }
 
 func (v SessionInfoUpdate) TitleState() NullableFieldState {
@@ -11023,16 +11409,170 @@ type SessionUpdateUserMessageChunk struct {
 // fields in the new update patch the previous fields for that message.
 type SessionUpdateUserMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys. Omitted means no metadata update; 'null' is an explicit clear signal.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Complete replacement content for this message.
 	Content []ContentBlock `json:"content,omitempty"`
 	// A unique identifier for the message.
 	MessageId     MessageId `json:"messageId"`
 	SessionUpdate string    `json:"sessionUpdate"`
+	hasMeta       bool      `json:"-"`
+	hasContent    bool      `json:"-"`
+}
+
+func (v SessionUpdateUserMessage) MarshalJSON() ([]byte, error) {
+	type Alias SessionUpdateUserMessage
+	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+	}{
+		Alias:   a,
+		Content: _contentJSON,
+		Meta:    __metaJSON,
+	})
+}
+
+func (v *SessionUpdateUserMessage) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateUserMessage{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["messageId"]
+		if !ok {
+			return fmt.Errorf("messageId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("messageId must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionUpdateUserMessage
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	*v = SessionUpdateUserMessage(a)
+	return nil
+}
+
+func (v SessionUpdateUserMessage) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUpdateUserMessage) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionUpdateUserMessage) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionUpdateUserMessage) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionUpdateUserMessage) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUpdateUserMessage) SetContent(value []ContentBlock) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *SessionUpdateUserMessage) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *SessionUpdateUserMessage) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
 }
 
 // A chunk of the agent's response being streamed.
@@ -11060,16 +11600,170 @@ type SessionUpdateAgentMessageChunk struct {
 // fields in the new update patch the previous fields for that message.
 type SessionUpdateAgentMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys. Omitted means no metadata update; 'null' is an explicit clear signal.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Complete replacement content for this message.
 	Content []ContentBlock `json:"content,omitempty"`
 	// A unique identifier for the message.
 	MessageId     MessageId `json:"messageId"`
 	SessionUpdate string    `json:"sessionUpdate"`
+	hasMeta       bool      `json:"-"`
+	hasContent    bool      `json:"-"`
+}
+
+func (v SessionUpdateAgentMessage) MarshalJSON() ([]byte, error) {
+	type Alias SessionUpdateAgentMessage
+	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+	}{
+		Alias:   a,
+		Content: _contentJSON,
+		Meta:    __metaJSON,
+	})
+}
+
+func (v *SessionUpdateAgentMessage) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateAgentMessage{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["messageId"]
+		if !ok {
+			return fmt.Errorf("messageId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("messageId must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionUpdateAgentMessage
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	*v = SessionUpdateAgentMessage(a)
+	return nil
+}
+
+func (v SessionUpdateAgentMessage) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUpdateAgentMessage) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionUpdateAgentMessage) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionUpdateAgentMessage) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionUpdateAgentMessage) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUpdateAgentMessage) SetContent(value []ContentBlock) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *SessionUpdateAgentMessage) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *SessionUpdateAgentMessage) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
 }
 
 // A chunk of the agent's internal reasoning being streamed.
@@ -11097,19 +11791,173 @@ type SessionUpdateAgentThoughtChunk struct {
 // fields in the new update patch the previous fields for that message.
 type SessionUpdateAgentThought struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys. Omitted means no metadata update; 'null' is an explicit clear signal.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Complete replacement content for this thought message.
 	Content []ContentBlock `json:"content,omitempty"`
 	// A unique identifier for the thought message.
 	MessageId     MessageId `json:"messageId"`
 	SessionUpdate string    `json:"sessionUpdate"`
+	hasMeta       bool      `json:"-"`
+	hasContent    bool      `json:"-"`
 }
 
-// The state of the agent's foreground work has changed.
+func (v SessionUpdateAgentThought) MarshalJSON() ([]byte, error) {
+	type Alias SessionUpdateAgentThought
+	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+	}{
+		Alias:   a,
+		Content: _contentJSON,
+		Meta:    __metaJSON,
+	})
+}
+
+func (v *SessionUpdateAgentThought) UnmarshalJSON(b []byte) error {
+	*v = SessionUpdateAgentThought{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["messageId"]
+		if !ok {
+			return fmt.Errorf("messageId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("messageId must not be null")
+		}
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	type Alias SessionUpdateAgentThought
+	var a Alias
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	*v = SessionUpdateAgentThought(a)
+	return nil
+}
+
+func (v SessionUpdateAgentThought) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUpdateAgentThought) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionUpdateAgentThought) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionUpdateAgentThought) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionUpdateAgentThought) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUpdateAgentThought) SetContent(value []ContentBlock) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *SessionUpdateAgentThought) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *SessionUpdateAgentThought) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
+}
+
+// A snapshot of the session's aggregate foreground activity.
 type SessionStateUpdate struct {
 	StateUpdate   StateUpdate `json:"-"`
 	SessionUpdate string      `json:"sessionUpdate"`
@@ -11183,10 +12031,13 @@ type SessionUpdateToolCallContentChunk struct {
 // A tool call has been created or updated.
 type SessionToolCallUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted means no metadata update; 'null' is an
-	// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Content produced by the tool call.
 	Content []ToolCallContent `json:"content,omitempty"`
@@ -11213,13 +12064,59 @@ type SessionToolCallUpdate struct {
 	// Human-readable title describing what the tool is doing.
 	Title *string `json:"title,omitempty"`
 	// Unique identifier for this tool call within the session.
-	ToolCallId ToolCallId `json:"toolCallId"`
-	hasName    bool       `json:"-"`
+	ToolCallId   ToolCallId `json:"toolCallId"`
+	hasMeta      bool       `json:"-"`
+	hasContent   bool       `json:"-"`
+	hasKind      bool       `json:"-"`
+	hasLocations bool       `json:"-"`
+	hasName      bool       `json:"-"`
+	hasStatus    bool       `json:"-"`
+	hasTitle     bool       `json:"-"`
 }
 
 func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 	type Alias SessionToolCallUpdate
 	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	var _kindJSON json.RawMessage
+	if a.Kind != nil {
+		encoded, err := json.Marshal(*a.Kind)
+		if err != nil {
+			return nil, err
+		}
+		_kindJSON = encoded
+	} else if a.hasKind {
+		_kindJSON = json.RawMessage("null")
+	}
+	var _locationsJSON json.RawMessage
+	if a.Locations != nil {
+		encoded, err := json.Marshal(a.Locations)
+		if err != nil {
+			return nil, err
+		}
+		_locationsJSON = encoded
+	} else if a.hasLocations {
+		_locationsJSON = json.RawMessage("null")
+	}
 	var _nameJSON json.RawMessage
 	if a.Name != nil {
 		encoded, err := json.Marshal(*a.Name)
@@ -11230,12 +12127,44 @@ func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 	} else if a.hasName {
 		_nameJSON = json.RawMessage("null")
 	}
+	var _statusJSON json.RawMessage
+	if a.Status != nil {
+		encoded, err := json.Marshal(*a.Status)
+		if err != nil {
+			return nil, err
+		}
+		_statusJSON = encoded
+	} else if a.hasStatus {
+		_statusJSON = json.RawMessage("null")
+	}
+	var _titleJSON json.RawMessage
+	if a.Title != nil {
+		encoded, err := json.Marshal(*a.Title)
+		if err != nil {
+			return nil, err
+		}
+		_titleJSON = encoded
+	} else if a.hasTitle {
+		_titleJSON = json.RawMessage("null")
+	}
 	return json.Marshal(struct {
 		Alias
-		Name json.RawMessage `json:"name,omitempty"`
+		Meta      json.RawMessage `json:"_meta,omitempty"`
+		Content   json.RawMessage `json:"content,omitempty"`
+		Kind      json.RawMessage `json:"kind,omitempty"`
+		Locations json.RawMessage `json:"locations,omitempty"`
+		Name      json.RawMessage `json:"name,omitempty"`
+		Status    json.RawMessage `json:"status,omitempty"`
+		Title     json.RawMessage `json:"title,omitempty"`
 	}{
-		Alias: a,
-		Name:  _nameJSON,
+		Alias:     a,
+		Content:   _contentJSON,
+		Kind:      _kindJSON,
+		Locations: _locationsJSON,
+		Meta:      __metaJSON,
+		Name:      _nameJSON,
+		Status:    _statusJSON,
+		Title:     _titleJSON,
 	})
 }
 
@@ -11265,15 +12194,204 @@ func (v *SessionToolCallUpdate) UnmarshalJSON(b []byte) error {
 	}
 	type Alias SessionToolCallUpdate
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta      json.RawMessage `json:"_meta"`
+		Content   json.RawMessage `json:"content"`
+		Kind      json.RawMessage `json:"kind"`
+		Locations json.RawMessage `json:"locations"`
+		Name      json.RawMessage `json:"name"`
+		Status    json.RawMessage `json:"status"`
+		Title     json.RawMessage `json:"title"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
+	a = raw.Alias
 	{
-		_, present := m["name"]
-		a.hasName = present
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ToolCallContent, 0, len(items))
+			for _, item := range items {
+				var value ToolCallContent
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		var value *ToolKind
+		if json.Unmarshal(raw.Kind, &value) == nil {
+			a.Kind = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Locations, &items) == nil && items != nil {
+			a.Locations = make([]ToolCallLocation, 0, len(items))
+			for _, item := range items {
+				var value ToolCallLocation
+				if json.Unmarshal(item, &value) == nil {
+					a.Locations = append(a.Locations, value)
+				}
+			}
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Name, &value) == nil {
+			a.Name = value
+		}
+	}
+	{
+		var value *ToolCallStatus
+		if json.Unmarshal(raw.Status, &value) == nil {
+			a.Status = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Title, &value) == nil {
+			a.Title = value
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["kind"]
+		a.hasKind = present && (a.Kind != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["locations"]
+		a.hasLocations = present && (a.Locations != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["name"]
+		a.hasName = present && (a.Name != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["status"]
+		a.hasStatus = present && (a.Status != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["title"]
+		a.hasTitle = present && (a.Title != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = SessionToolCallUpdate(a)
 	return nil
+}
+
+func (v SessionToolCallUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionToolCallUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionToolCallUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionToolCallUpdate) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetContent(value []ToolCallContent) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *SessionToolCallUpdate) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *SessionToolCallUpdate) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
+}
+
+func (v SessionToolCallUpdate) KindState() NullableFieldState {
+	if v.Kind != nil {
+		return NullableFieldValue
+	}
+	if v.hasKind {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetKind(value ToolKind) {
+	v.Kind = &value
+	v.hasKind = true
+}
+
+func (v *SessionToolCallUpdate) ClearKind() {
+	v.Kind = nil
+	v.hasKind = true
+}
+
+func (v *SessionToolCallUpdate) UnsetKind() {
+	v.Kind = nil
+	v.hasKind = false
+}
+
+func (v SessionToolCallUpdate) LocationsState() NullableFieldState {
+	if v.Locations != nil {
+		return NullableFieldValue
+	}
+	if v.hasLocations {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetLocations(value []ToolCallLocation) {
+	v.Locations = value
+	v.hasLocations = true
+}
+
+func (v *SessionToolCallUpdate) ClearLocations() {
+	v.Locations = nil
+	v.hasLocations = true
+}
+
+func (v *SessionToolCallUpdate) UnsetLocations() {
+	v.Locations = nil
+	v.hasLocations = false
 }
 
 func (v SessionToolCallUpdate) NameState() NullableFieldState {
@@ -11301,13 +12419,66 @@ func (v *SessionToolCallUpdate) UnsetName() {
 	v.hasName = false
 }
 
+func (v SessionToolCallUpdate) StatusState() NullableFieldState {
+	if v.Status != nil {
+		return NullableFieldValue
+	}
+	if v.hasStatus {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetStatus(value ToolCallStatus) {
+	v.Status = &value
+	v.hasStatus = true
+}
+
+func (v *SessionToolCallUpdate) ClearStatus() {
+	v.Status = nil
+	v.hasStatus = true
+}
+
+func (v *SessionToolCallUpdate) UnsetStatus() {
+	v.Status = nil
+	v.hasStatus = false
+}
+
+func (v SessionToolCallUpdate) TitleState() NullableFieldState {
+	if v.Title != nil {
+		return NullableFieldValue
+	}
+	if v.hasTitle {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetTitle(value string) {
+	v.Title = &value
+	v.hasTitle = true
+}
+
+func (v *SessionToolCallUpdate) ClearTitle() {
+	v.Title = nil
+	v.hasTitle = true
+}
+
+func (v *SessionToolCallUpdate) UnsetTitle() {
+	v.Title = nil
+	v.hasTitle = false
+}
+
 // An agent-owned terminal has been created or updated.
 type SessionTerminalUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted means no metadata update; 'null' is an
-	// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The command being run.
 	Command *string `json:"command,omitempty"`
@@ -11319,7 +12490,299 @@ type SessionTerminalUpdate struct {
 	Output        *TerminalOutput `json:"output,omitempty"`
 	SessionUpdate string          `json:"sessionUpdate"`
 	// Unique identifier for this terminal within the session.
-	TerminalId TerminalId `json:"terminalId"`
+	TerminalId    TerminalId `json:"terminalId"`
+	hasMeta       bool       `json:"-"`
+	hasCommand    bool       `json:"-"`
+	hasCwd        bool       `json:"-"`
+	hasExitStatus bool       `json:"-"`
+	hasOutput     bool       `json:"-"`
+}
+
+func (v SessionTerminalUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionTerminalUpdate
+	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _commandJSON json.RawMessage
+	if a.Command != nil {
+		encoded, err := json.Marshal(*a.Command)
+		if err != nil {
+			return nil, err
+		}
+		_commandJSON = encoded
+	} else if a.hasCommand {
+		_commandJSON = json.RawMessage("null")
+	}
+	var _cwdJSON json.RawMessage
+	if a.Cwd != nil {
+		encoded, err := json.Marshal(*a.Cwd)
+		if err != nil {
+			return nil, err
+		}
+		_cwdJSON = encoded
+	} else if a.hasCwd {
+		_cwdJSON = json.RawMessage("null")
+	}
+	var _exitStatusJSON json.RawMessage
+	if a.ExitStatus != nil {
+		encoded, err := json.Marshal(*a.ExitStatus)
+		if err != nil {
+			return nil, err
+		}
+		_exitStatusJSON = encoded
+	} else if a.hasExitStatus {
+		_exitStatusJSON = json.RawMessage("null")
+	}
+	var _outputJSON json.RawMessage
+	if a.Output != nil {
+		encoded, err := json.Marshal(*a.Output)
+		if err != nil {
+			return nil, err
+		}
+		_outputJSON = encoded
+	} else if a.hasOutput {
+		_outputJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta       json.RawMessage `json:"_meta,omitempty"`
+		Command    json.RawMessage `json:"command,omitempty"`
+		Cwd        json.RawMessage `json:"cwd,omitempty"`
+		ExitStatus json.RawMessage `json:"exitStatus,omitempty"`
+		Output     json.RawMessage `json:"output,omitempty"`
+	}{
+		Alias:      a,
+		Command:    _commandJSON,
+		Cwd:        _cwdJSON,
+		ExitStatus: _exitStatusJSON,
+		Meta:       __metaJSON,
+		Output:     _outputJSON,
+	})
+}
+
+func (v *SessionTerminalUpdate) UnmarshalJSON(b []byte) error {
+	*v = SessionTerminalUpdate{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionUpdate"]
+		if !ok {
+			return fmt.Errorf("sessionUpdate is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionUpdate must not be null")
+		}
+	}
+	{
+		raw, ok := m["terminalId"]
+		if !ok {
+			return fmt.Errorf("terminalId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("terminalId must not be null")
+		}
+	}
+	type Alias SessionTerminalUpdate
+	var a Alias
+	var raw struct {
+		Alias
+		Meta       json.RawMessage `json:"_meta"`
+		Command    json.RawMessage `json:"command"`
+		Cwd        json.RawMessage `json:"cwd"`
+		ExitStatus json.RawMessage `json:"exitStatus"`
+		Output     json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Command, &value) == nil {
+			a.Command = value
+		}
+	}
+	{
+		var value *AbsolutePath
+		if json.Unmarshal(raw.Cwd, &value) == nil {
+			a.Cwd = value
+		}
+	}
+	{
+		var value *TerminalExitStatus
+		if json.Unmarshal(raw.ExitStatus, &value) == nil {
+			a.ExitStatus = value
+		}
+	}
+	{
+		var value *TerminalOutput
+		if json.Unmarshal(raw.Output, &value) == nil {
+			a.Output = value
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["command"]
+		a.hasCommand = present && (a.Command != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["cwd"]
+		a.hasCwd = present && (a.Cwd != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["exitStatus"]
+		a.hasExitStatus = present && (a.ExitStatus != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["output"]
+		a.hasOutput = present && (a.Output != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	*v = SessionTerminalUpdate(a)
+	return nil
+}
+
+func (v SessionTerminalUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionTerminalUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionTerminalUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionTerminalUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v SessionTerminalUpdate) CommandState() NullableFieldState {
+	if v.Command != nil {
+		return NullableFieldValue
+	}
+	if v.hasCommand {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionTerminalUpdate) SetCommand(value string) {
+	v.Command = &value
+	v.hasCommand = true
+}
+
+func (v *SessionTerminalUpdate) ClearCommand() {
+	v.Command = nil
+	v.hasCommand = true
+}
+
+func (v *SessionTerminalUpdate) UnsetCommand() {
+	v.Command = nil
+	v.hasCommand = false
+}
+
+func (v SessionTerminalUpdate) CwdState() NullableFieldState {
+	if v.Cwd != nil {
+		return NullableFieldValue
+	}
+	if v.hasCwd {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionTerminalUpdate) SetCwd(value AbsolutePath) {
+	v.Cwd = &value
+	v.hasCwd = true
+}
+
+func (v *SessionTerminalUpdate) ClearCwd() {
+	v.Cwd = nil
+	v.hasCwd = true
+}
+
+func (v *SessionTerminalUpdate) UnsetCwd() {
+	v.Cwd = nil
+	v.hasCwd = false
+}
+
+func (v SessionTerminalUpdate) ExitStatusState() NullableFieldState {
+	if v.ExitStatus != nil {
+		return NullableFieldValue
+	}
+	if v.hasExitStatus {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionTerminalUpdate) SetExitStatus(value TerminalExitStatus) {
+	v.ExitStatus = &value
+	v.hasExitStatus = true
+}
+
+func (v *SessionTerminalUpdate) ClearExitStatus() {
+	v.ExitStatus = nil
+	v.hasExitStatus = true
+}
+
+func (v *SessionTerminalUpdate) UnsetExitStatus() {
+	v.ExitStatus = nil
+	v.hasExitStatus = false
+}
+
+func (v SessionTerminalUpdate) OutputState() NullableFieldState {
+	if v.Output != nil {
+		return NullableFieldValue
+	}
+	if v.hasOutput {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionTerminalUpdate) SetOutput(value TerminalOutput) {
+	v.Output = &value
+	v.hasOutput = true
+}
+
+func (v *SessionTerminalUpdate) ClearOutput() {
+	v.Output = nil
+	v.hasOutput = true
+}
+
+func (v *SessionTerminalUpdate) UnsetOutput() {
+	v.Output = nil
+	v.hasOutput = false
 }
 
 // A chunk of bytes appended to an agent-owned terminal's output.
@@ -11381,16 +12844,20 @@ type SessionConfigOptionUpdate struct {
 // Session metadata has been updated (title, timestamps, custom metadata)
 type SessionSessionInfoUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted means no metadata update; 'null' is an
-	// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta          map[string]json.RawMessage `json:"_meta,omitempty"`
 	SessionUpdate string                     `json:"sessionUpdate"`
 	// Human-readable title for the session. Set to null to clear.
 	Title *string `json:"title,omitempty"`
 	// RFC 3339 timestamp of last activity. Set to null to clear.
 	UpdatedAt    *string `json:"updatedAt,omitempty"`
+	hasMeta      bool    `json:"-"`
 	hasTitle     bool    `json:"-"`
 	hasUpdatedAt bool    `json:"-"`
 }
@@ -11398,6 +12865,16 @@ type SessionSessionInfoUpdate struct {
 func (v SessionSessionInfoUpdate) MarshalJSON() ([]byte, error) {
 	type Alias SessionSessionInfoUpdate
 	a := Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
 	var _titleJSON json.RawMessage
 	if a.Title != nil {
 		encoded, err := json.Marshal(*a.Title)
@@ -11420,10 +12897,12 @@ func (v SessionSessionInfoUpdate) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		Alias
+		Meta      json.RawMessage `json:"_meta,omitempty"`
 		Title     json.RawMessage `json:"title,omitempty"`
 		UpdatedAt json.RawMessage `json:"updatedAt,omitempty"`
 	}{
 		Alias:     a,
+		Meta:      __metaJSON,
 		Title:     _titleJSON,
 		UpdatedAt: _updatedAtJSON,
 	})
@@ -11446,19 +12925,73 @@ func (v *SessionSessionInfoUpdate) UnmarshalJSON(b []byte) error {
 	}
 	type Alias SessionSessionInfoUpdate
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta      json.RawMessage `json:"_meta"`
+		Title     json.RawMessage `json:"title"`
+		UpdatedAt json.RawMessage `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
+	a = raw.Alias
 	{
-		_, present := m["title"]
-		a.hasTitle = present
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
 	}
 	{
-		_, present := m["updatedAt"]
-		a.hasUpdatedAt = present
+		var value *string
+		if json.Unmarshal(raw.Title, &value) == nil {
+			a.Title = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.UpdatedAt, &value) == nil {
+			a.UpdatedAt = value
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["title"]
+		a.hasTitle = present && (a.Title != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["updatedAt"]
+		a.hasUpdatedAt = present && (a.UpdatedAt != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = SessionSessionInfoUpdate(a)
 	return nil
+}
+
+func (v SessionSessionInfoUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionSessionInfoUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *SessionSessionInfoUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *SessionSessionInfoUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
 }
 
 func (v SessionSessionInfoUpdate) TitleState() NullableFieldState {
@@ -11618,7 +13151,14 @@ func (v *SessionUpdateNotice) UnmarshalJSON(b []byte) error {
 
 // A context compaction has been created or updated.
 type SessionCompactionUpdate struct {
-	// Extensible metadata patch for this compaction.
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
+	//
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The Agent-owned ID of this compaction, unique within the session.
 	CompactionId CompactionId `json:"compactionId"`
@@ -11940,7 +13480,7 @@ type SessionUpdate struct {
 	// receives another 'agent_thought' update with the same 'messageId',
 	// fields in the new update patch the previous fields for that message.
 	AgentThought *SessionUpdateAgentThought `json:"-"`
-	// The state of the agent's foreground work has changed.
+	// A snapshot of the session's aggregate foreground activity.
 	StateUpdate *SessionStateUpdate `json:"-"`
 	// A chunk of tool-call content being streamed.
 	ToolCallContentChunk *SessionUpdateToolCallContentChunk `json:"-"`
@@ -13525,10 +15065,46 @@ func (v *SetSessionConfigOptionResponse) Validate() error {
 	return nil
 }
 
-// The state of the agent's foreground work has changed.
+// A snapshot of the session's aggregate foreground activity.
+//
+// Foreground work is the agent's active response or workflow in the session,
+// including model processing, tool execution, and waiting for user action needed
+// to continue that work. It can start with a prompt or be agent-initiated, for
+// example to pursue an ongoing goal or follow up on a completed background task.
+// Either way, the agent MUST report 'running' when foreground work starts,
+// or 'requires_action' if it starts blocked on user action, and 'idle' when it
+// ends. The agent SHOULD include a stop reason on that idle update.
+// Agent-initiated work does not require a prompt request or a synthetic user
+// message.
+//
+// 'running' may precede user-message insertion, for example during a foreground
+// hook. It is not acknowledgment of insertion, and rejecting a prompt does not
+// itself end foreground work.
 //
 // Background activity can continue and emit other 'session/update' notifications
-// while 'idle'. Those notifications do not change this state.
+// while 'idle'. Those notifications, including a detached task's progress or
+// completion, do not by themselves change this state. A permission request only
+// warrants 'requires_action' when foreground work is blocked on user action.
+//
+// The agent SHOULD report 'requires_action' when the foreground workflow as a
+// whole cannot progress without user action, including permissions or elicitations.
+// Once reported, it MUST report 'running' when progress resumes, or 'idle' when
+// work ends without resuming.
+// If other foreground work can progress, the state remains 'running'. Resolving
+// one of several requests does not itself change the state. Agents SHOULD ignore
+// responses for work that has already ended rather than use them to resume it.
+//
+// A new session defaults to idle until a state update reports otherwise.
+// Resume MUST send a current-state snapshot after any replay and before its
+// response. The snapshot reports foreground state after resuming.
+// The response alone does not imply idle.
+// Repeated snapshots are idempotent, not additional work, completions, or usage.
+// A repeated state may carry updated information without another state transition.
+// The agent MUST report 'idle' when no foreground activity remains. Completing
+// an individual activity while other foreground work continues does not require
+// an idle boundary. Local commands use the same lifecycle even without model work.
+//
+// See protocol docs: [Session States](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#session-states)
 // Foreground work is in progress.
 type StateUpdateRunning struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -13540,7 +15116,7 @@ type StateUpdateRunning struct {
 	State string                     `json:"state"`
 }
 
-// The agent is ready to process a new prompt.
+// No foreground work is active. Background activity may continue.
 type StateUpdateIdle struct {
 	IdleStateUpdate IdleStateUpdate `json:"-"`
 	State           string          `json:"state"`
@@ -13617,7 +15193,7 @@ type StateUpdateOther = json.RawMessage
 type StateUpdate struct {
 	// Foreground work is in progress.
 	Running *StateUpdateRunning `json:"-"`
-	// The agent is ready to process a new prompt.
+	// No foreground work is active. Background activity may continue.
 	Idle *StateUpdateIdle `json:"-"`
 	// Foreground work is blocked on user action.
 	RequiresAction *StateUpdateRequiresAction `json:"-"`
@@ -14217,14 +15793,18 @@ func (v *TerminalOutputChunk) UnmarshalJSON(b []byte) error {
 //
 // Only ['TerminalUpdate::terminal_id'] is required. Other fields have patch
 // semantics: omitted fields leave the stored value unchanged, 'null' clears
-// it, and concrete values replace it. When the terminal ID is new, omitted
-// fields start unknown.
+// it, and concrete values replace it. A concrete '_meta' object instead
+// patches the stored metadata by top-level key. When the terminal ID is new,
+// omitted fields start unknown.
 type TerminalUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted means no metadata update; 'null' is an
-	// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The command being run.
 	Command *string `json:"command,omitempty"`
@@ -14235,7 +15815,83 @@ type TerminalUpdate struct {
 	// An authoritative replacement snapshot of terminal output bytes.
 	Output *TerminalOutput `json:"output,omitempty"`
 	// Unique identifier for this terminal within the session.
-	TerminalId TerminalId `json:"terminalId"`
+	TerminalId    TerminalId `json:"terminalId"`
+	hasMeta       bool       `json:"-"`
+	hasCommand    bool       `json:"-"`
+	hasCwd        bool       `json:"-"`
+	hasExitStatus bool       `json:"-"`
+	hasOutput     bool       `json:"-"`
+}
+
+func (v TerminalUpdate) MarshalJSON() ([]byte, error) {
+	type Alias TerminalUpdate
+	var a Alias
+	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _commandJSON json.RawMessage
+	if a.Command != nil {
+		encoded, err := json.Marshal(*a.Command)
+		if err != nil {
+			return nil, err
+		}
+		_commandJSON = encoded
+	} else if a.hasCommand {
+		_commandJSON = json.RawMessage("null")
+	}
+	var _cwdJSON json.RawMessage
+	if a.Cwd != nil {
+		encoded, err := json.Marshal(*a.Cwd)
+		if err != nil {
+			return nil, err
+		}
+		_cwdJSON = encoded
+	} else if a.hasCwd {
+		_cwdJSON = json.RawMessage("null")
+	}
+	var _exitStatusJSON json.RawMessage
+	if a.ExitStatus != nil {
+		encoded, err := json.Marshal(*a.ExitStatus)
+		if err != nil {
+			return nil, err
+		}
+		_exitStatusJSON = encoded
+	} else if a.hasExitStatus {
+		_exitStatusJSON = json.RawMessage("null")
+	}
+	var _outputJSON json.RawMessage
+	if a.Output != nil {
+		encoded, err := json.Marshal(*a.Output)
+		if err != nil {
+			return nil, err
+		}
+		_outputJSON = encoded
+	} else if a.hasOutput {
+		_outputJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta       json.RawMessage `json:"_meta,omitempty"`
+		Command    json.RawMessage `json:"command,omitempty"`
+		Cwd        json.RawMessage `json:"cwd,omitempty"`
+		ExitStatus json.RawMessage `json:"exitStatus,omitempty"`
+		Output     json.RawMessage `json:"output,omitempty"`
+	}{
+		Alias:      a,
+		Command:    _commandJSON,
+		Cwd:        _cwdJSON,
+		ExitStatus: _exitStatusJSON,
+		Meta:       __metaJSON,
+		Output:     _outputJSON,
+	})
 }
 
 func (v *TerminalUpdate) UnmarshalJSON(b []byte) error {
@@ -14255,11 +15911,195 @@ func (v *TerminalUpdate) UnmarshalJSON(b []byte) error {
 	}
 	type Alias TerminalUpdate
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta       json.RawMessage `json:"_meta"`
+		Command    json.RawMessage `json:"command"`
+		Cwd        json.RawMessage `json:"cwd"`
+		ExitStatus json.RawMessage `json:"exitStatus"`
+		Output     json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Command, &value) == nil {
+			a.Command = value
+		}
+	}
+	{
+		var value *AbsolutePath
+		if json.Unmarshal(raw.Cwd, &value) == nil {
+			a.Cwd = value
+		}
+	}
+	{
+		var value *TerminalExitStatus
+		if json.Unmarshal(raw.ExitStatus, &value) == nil {
+			a.ExitStatus = value
+		}
+	}
+	{
+		var value *TerminalOutput
+		if json.Unmarshal(raw.Output, &value) == nil {
+			a.Output = value
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["command"]
+		a.hasCommand = present && (a.Command != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["cwd"]
+		a.hasCwd = present && (a.Cwd != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["exitStatus"]
+		a.hasExitStatus = present && (a.ExitStatus != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["output"]
+		a.hasOutput = present && (a.Output != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = TerminalUpdate(a)
 	return nil
+}
+
+func (v TerminalUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *TerminalUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *TerminalUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *TerminalUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v TerminalUpdate) CommandState() NullableFieldState {
+	if v.Command != nil {
+		return NullableFieldValue
+	}
+	if v.hasCommand {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *TerminalUpdate) SetCommand(value string) {
+	v.Command = &value
+	v.hasCommand = true
+}
+
+func (v *TerminalUpdate) ClearCommand() {
+	v.Command = nil
+	v.hasCommand = true
+}
+
+func (v *TerminalUpdate) UnsetCommand() {
+	v.Command = nil
+	v.hasCommand = false
+}
+
+func (v TerminalUpdate) CwdState() NullableFieldState {
+	if v.Cwd != nil {
+		return NullableFieldValue
+	}
+	if v.hasCwd {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *TerminalUpdate) SetCwd(value AbsolutePath) {
+	v.Cwd = &value
+	v.hasCwd = true
+}
+
+func (v *TerminalUpdate) ClearCwd() {
+	v.Cwd = nil
+	v.hasCwd = true
+}
+
+func (v *TerminalUpdate) UnsetCwd() {
+	v.Cwd = nil
+	v.hasCwd = false
+}
+
+func (v TerminalUpdate) ExitStatusState() NullableFieldState {
+	if v.ExitStatus != nil {
+		return NullableFieldValue
+	}
+	if v.hasExitStatus {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *TerminalUpdate) SetExitStatus(value TerminalExitStatus) {
+	v.ExitStatus = &value
+	v.hasExitStatus = true
+}
+
+func (v *TerminalUpdate) ClearExitStatus() {
+	v.ExitStatus = nil
+	v.hasExitStatus = true
+}
+
+func (v *TerminalUpdate) UnsetExitStatus() {
+	v.ExitStatus = nil
+	v.hasExitStatus = false
+}
+
+func (v TerminalUpdate) OutputState() NullableFieldState {
+	if v.Output != nil {
+		return NullableFieldValue
+	}
+	if v.hasOutput {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *TerminalUpdate) SetOutput(value TerminalOutput) {
+	v.Output = &value
+	v.hasOutput = true
+}
+
+func (v *TerminalUpdate) ClearOutput() {
+	v.Output = nil
+	v.hasOutput = true
+}
+
+func (v *TerminalUpdate) UnsetOutput() {
+	v.Output = nil
+	v.hasOutput = false
 }
 
 // All text that was typed after the command name is provided as input.
@@ -14880,16 +16720,20 @@ const (
 // omitted fields leave the existing tool call value unchanged, 'null' clears or
 // unsets the value, and concrete values replace the previous value. For
 // collection fields, concrete arrays replace the previous collection, and both
-// 'null' and '[]' clear the collection. When a client receives a tool call ID it
-// has not seen before, omitted fields use client defaults.
+// 'null' and '[]' clear the collection. A concrete '_meta' object instead
+// patches the stored metadata by top-level key. When a client receives a tool
+// call ID it has not seen before, omitted fields use client defaults.
 //
 // See protocol docs: [Tool Calls](https://agentclientprotocol.com/protocol/v2/tool-calls)
 type ToolCallUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted means no metadata update; 'null' is an
-	// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Content produced by the tool call.
 	Content []ToolCallContent `json:"content,omitempty"`
@@ -14915,14 +16759,60 @@ type ToolCallUpdate struct {
 	// Human-readable title describing what the tool is doing.
 	Title *string `json:"title,omitempty"`
 	// Unique identifier for this tool call within the session.
-	ToolCallId ToolCallId `json:"toolCallId"`
-	hasName    bool       `json:"-"`
+	ToolCallId   ToolCallId `json:"toolCallId"`
+	hasMeta      bool       `json:"-"`
+	hasContent   bool       `json:"-"`
+	hasKind      bool       `json:"-"`
+	hasLocations bool       `json:"-"`
+	hasName      bool       `json:"-"`
+	hasStatus    bool       `json:"-"`
+	hasTitle     bool       `json:"-"`
 }
 
 func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 	type Alias ToolCallUpdate
 	var a Alias
 	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	var _kindJSON json.RawMessage
+	if a.Kind != nil {
+		encoded, err := json.Marshal(*a.Kind)
+		if err != nil {
+			return nil, err
+		}
+		_kindJSON = encoded
+	} else if a.hasKind {
+		_kindJSON = json.RawMessage("null")
+	}
+	var _locationsJSON json.RawMessage
+	if a.Locations != nil {
+		encoded, err := json.Marshal(a.Locations)
+		if err != nil {
+			return nil, err
+		}
+		_locationsJSON = encoded
+	} else if a.hasLocations {
+		_locationsJSON = json.RawMessage("null")
+	}
 	var _nameJSON json.RawMessage
 	if a.Name != nil {
 		encoded, err := json.Marshal(*a.Name)
@@ -14933,12 +16823,44 @@ func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 	} else if a.hasName {
 		_nameJSON = json.RawMessage("null")
 	}
+	var _statusJSON json.RawMessage
+	if a.Status != nil {
+		encoded, err := json.Marshal(*a.Status)
+		if err != nil {
+			return nil, err
+		}
+		_statusJSON = encoded
+	} else if a.hasStatus {
+		_statusJSON = json.RawMessage("null")
+	}
+	var _titleJSON json.RawMessage
+	if a.Title != nil {
+		encoded, err := json.Marshal(*a.Title)
+		if err != nil {
+			return nil, err
+		}
+		_titleJSON = encoded
+	} else if a.hasTitle {
+		_titleJSON = json.RawMessage("null")
+	}
 	return json.Marshal(struct {
 		Alias
-		Name json.RawMessage `json:"name,omitempty"`
+		Meta      json.RawMessage `json:"_meta,omitempty"`
+		Content   json.RawMessage `json:"content,omitempty"`
+		Kind      json.RawMessage `json:"kind,omitempty"`
+		Locations json.RawMessage `json:"locations,omitempty"`
+		Name      json.RawMessage `json:"name,omitempty"`
+		Status    json.RawMessage `json:"status,omitempty"`
+		Title     json.RawMessage `json:"title,omitempty"`
 	}{
-		Alias: a,
-		Name:  _nameJSON,
+		Alias:     a,
+		Content:   _contentJSON,
+		Kind:      _kindJSON,
+		Locations: _locationsJSON,
+		Meta:      __metaJSON,
+		Name:      _nameJSON,
+		Status:    _statusJSON,
+		Title:     _titleJSON,
 	})
 }
 
@@ -14959,15 +16881,204 @@ func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
 	}
 	type Alias ToolCallUpdate
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta      json.RawMessage `json:"_meta"`
+		Content   json.RawMessage `json:"content"`
+		Kind      json.RawMessage `json:"kind"`
+		Locations json.RawMessage `json:"locations"`
+		Name      json.RawMessage `json:"name"`
+		Status    json.RawMessage `json:"status"`
+		Title     json.RawMessage `json:"title"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
+	a = raw.Alias
 	{
-		_, present := m["name"]
-		a.hasName = present
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ToolCallContent, 0, len(items))
+			for _, item := range items {
+				var value ToolCallContent
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		var value *ToolKind
+		if json.Unmarshal(raw.Kind, &value) == nil {
+			a.Kind = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Locations, &items) == nil && items != nil {
+			a.Locations = make([]ToolCallLocation, 0, len(items))
+			for _, item := range items {
+				var value ToolCallLocation
+				if json.Unmarshal(item, &value) == nil {
+					a.Locations = append(a.Locations, value)
+				}
+			}
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Name, &value) == nil {
+			a.Name = value
+		}
+	}
+	{
+		var value *ToolCallStatus
+		if json.Unmarshal(raw.Status, &value) == nil {
+			a.Status = value
+		}
+	}
+	{
+		var value *string
+		if json.Unmarshal(raw.Title, &value) == nil {
+			a.Title = value
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["kind"]
+		a.hasKind = present && (a.Kind != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["locations"]
+		a.hasLocations = present && (a.Locations != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["name"]
+		a.hasName = present && (a.Name != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["status"]
+		a.hasStatus = present && (a.Status != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["title"]
+		a.hasTitle = present && (a.Title != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = ToolCallUpdate(a)
 	return nil
+}
+
+func (v ToolCallUpdate) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *ToolCallUpdate) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *ToolCallUpdate) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v ToolCallUpdate) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetContent(value []ToolCallContent) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *ToolCallUpdate) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *ToolCallUpdate) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
+}
+
+func (v ToolCallUpdate) KindState() NullableFieldState {
+	if v.Kind != nil {
+		return NullableFieldValue
+	}
+	if v.hasKind {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetKind(value ToolKind) {
+	v.Kind = &value
+	v.hasKind = true
+}
+
+func (v *ToolCallUpdate) ClearKind() {
+	v.Kind = nil
+	v.hasKind = true
+}
+
+func (v *ToolCallUpdate) UnsetKind() {
+	v.Kind = nil
+	v.hasKind = false
+}
+
+func (v ToolCallUpdate) LocationsState() NullableFieldState {
+	if v.Locations != nil {
+		return NullableFieldValue
+	}
+	if v.hasLocations {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetLocations(value []ToolCallLocation) {
+	v.Locations = value
+	v.hasLocations = true
+}
+
+func (v *ToolCallUpdate) ClearLocations() {
+	v.Locations = nil
+	v.hasLocations = true
+}
+
+func (v *ToolCallUpdate) UnsetLocations() {
+	v.Locations = nil
+	v.hasLocations = false
 }
 
 func (v ToolCallUpdate) NameState() NullableFieldState {
@@ -14993,6 +17104,56 @@ func (v *ToolCallUpdate) ClearName() {
 func (v *ToolCallUpdate) UnsetName() {
 	v.Name = nil
 	v.hasName = false
+}
+
+func (v ToolCallUpdate) StatusState() NullableFieldState {
+	if v.Status != nil {
+		return NullableFieldValue
+	}
+	if v.hasStatus {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetStatus(value ToolCallStatus) {
+	v.Status = &value
+	v.hasStatus = true
+}
+
+func (v *ToolCallUpdate) ClearStatus() {
+	v.Status = nil
+	v.hasStatus = true
+}
+
+func (v *ToolCallUpdate) UnsetStatus() {
+	v.Status = nil
+	v.hasStatus = false
+}
+
+func (v ToolCallUpdate) TitleState() NullableFieldState {
+	if v.Title != nil {
+		return NullableFieldValue
+	}
+	if v.hasTitle {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetTitle(value string) {
+	v.Title = &value
+	v.hasTitle = true
+}
+
+func (v *ToolCallUpdate) ClearTitle() {
+	v.Title = nil
+	v.hasTitle = true
+}
+
+func (v *ToolCallUpdate) UnsetTitle() {
+	v.Title = nil
+	v.hasTitle = false
 }
 
 func (v *ToolCallUpdate) Validate() error {
@@ -15142,15 +17303,55 @@ func (v *UsageUpdate) UnmarshalJSON(b []byte) error {
 // content.
 type UserMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-	// these keys. Omitted means no metadata update; 'null' is an explicit clear signal.
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// clears it. An object patches the stored metadata by top-level key: keys it omits are
+	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
+	// stored value without merging nested objects. Beyond this patch rule, implementations
+	// MUST NOT make assumptions about values at these keys.
 	//
-	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Complete replacement content for this message.
 	Content []ContentBlock `json:"content,omitempty"`
 	// A unique identifier for the message.
-	MessageId MessageId `json:"messageId"`
+	MessageId  MessageId `json:"messageId"`
+	hasMeta    bool      `json:"-"`
+	hasContent bool      `json:"-"`
+}
+
+func (v UserMessage) MarshalJSON() ([]byte, error) {
+	type Alias UserMessage
+	var a Alias
+	a = Alias(v)
+	var __metaJSON json.RawMessage
+	if a.Meta != nil {
+		encoded, err := json.Marshal(a.Meta)
+		if err != nil {
+			return nil, err
+		}
+		__metaJSON = encoded
+	} else if a.hasMeta {
+		__metaJSON = json.RawMessage("null")
+	}
+	var _contentJSON json.RawMessage
+	if a.Content != nil {
+		encoded, err := json.Marshal(a.Content)
+		if err != nil {
+			return nil, err
+		}
+		_contentJSON = encoded
+	} else if a.hasContent {
+		_contentJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+	}{
+		Alias:   a,
+		Content: _contentJSON,
+		Meta:    __metaJSON,
+	})
 }
 
 func (v *UserMessage) UnmarshalJSON(b []byte) error {
@@ -15170,11 +17371,93 @@ func (v *UserMessage) UnmarshalJSON(b []byte) error {
 	}
 	type Alias UserMessage
 	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
+	var raw struct {
+		Alias
+		Meta    json.RawMessage `json:"_meta"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var items []json.RawMessage
+		if json.Unmarshal(raw.Content, &items) == nil && items != nil {
+			a.Content = make([]ContentBlock, 0, len(items))
+			for _, item := range items {
+				var value ContentBlock
+				if json.Unmarshal(item, &value) == nil {
+					a.Content = append(a.Content, value)
+				}
+			}
+		}
+	}
+	{
+		raw, present := m["_meta"]
+		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["content"]
+		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	*v = UserMessage(a)
 	return nil
+}
+
+func (v UserMessage) MetaState() NullableFieldState {
+	if v.Meta != nil {
+		return NullableFieldValue
+	}
+	if v.hasMeta {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *UserMessage) SetMeta(value map[string]json.RawMessage) {
+	v.Meta = value
+	v.hasMeta = true
+}
+
+func (v *UserMessage) ClearMeta() {
+	v.Meta = nil
+	v.hasMeta = true
+}
+
+func (v *UserMessage) UnsetMeta() {
+	v.Meta = nil
+	v.hasMeta = false
+}
+
+func (v UserMessage) ContentState() NullableFieldState {
+	if v.Content != nil {
+		return NullableFieldValue
+	}
+	if v.hasContent {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *UserMessage) SetContent(value []ContentBlock) {
+	v.Content = value
+	v.hasContent = true
+}
+
+func (v *UserMessage) ClearContent() {
+	v.Content = nil
+	v.hasContent = true
+}
+
+func (v *UserMessage) UnsetContent() {
+	v.Content = nil
+	v.hasContent = false
 }
 
 type Agent interface {
@@ -15223,6 +17506,17 @@ type AgentSessionCloser interface {
 	// The agent **must** cancel any ongoing work related to the session (treat it
 	// as if 'session/cancel' was called) and then free up any resources associated
 	// with the session.
+	//
+	// When closing cancels active foreground work, the Agent MUST send the final
+	// updates for that work and the idle 'state_update' with 'stopReason: "cancelled"'
+	// before responding successfully to 'session/close'. Closing an idle session
+	// does not itself require another idle update.
+	//
+	// Closing may also cancel pending 'session/prompt' requests, including queued
+	// prompts. If closing prevents a prompt's user message from being inserted, the
+	// Agent MUST answer that request with '-32800' (Request Cancelled). If the message
+	// has already been inserted, the Agent MUST respond successfully with its
+	// 'messageId'. Prompt responses need not precede the close response.
 	CloseSession(ctx context.Context, params CloseSessionRequest) (CloseSessionResponse, error)
 }
 
@@ -15276,11 +17570,25 @@ type ClientElicitation interface {
 	// The agent sends this to the client to request information from the user,
 	// either via a form or by directing them to a URL.
 	// Elicitations are tied to a session (optionally a tool call) or a request.
+	//
+	// A session-scoped request follows the aggregate foreground-state contract:
+	// agents SHOULD report 'requires_action' when the whole foreground workflow is
+	// blocked on user action. Once reported, they MUST report 'running' when progress
+	// resumes, or 'idle' if work ends without resuming. Independent background requests
+	// and request-scoped elicitations do not themselves change session state.
+	// Accepting a URL does not mean the external interaction completed.
+	//
+	// Agents SHOULD cancel pending elicitations no longer needed by cancelled work.
+	// The request's scope alone does not establish that dependency.
+	//
+	// See protocol docs: [Elicitation](https://agentclientprotocol.com/protocol/v2/elicitation)
 	CreateElicitation(ctx context.Context, params CreateElicitationRequest) (CreateElicitationResponse, error)
 }
 
 // ClientElicitationCompletion defines optional URL elicitation completion notifications.
 type ClientElicitationCompletion interface {
 	// Notification sent by the agent when a URL-based elicitation is complete.
+	//
+	// This notification is not a foreground state update.
 	CompleteElicitation(ctx context.Context, params CompleteElicitationNotification) error
 }

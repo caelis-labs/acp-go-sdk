@@ -20,6 +20,15 @@ empty summary replacement, and explicit error/metadata clears alongside the
 conversation and reverse permission request. `session-cancel` proves prompt-turn cancellation.
 `request-cancel` separately proves `$/cancel_request` and JSON-RPC `-32800`.
 
+Core also checks empty `session/list` requests, after advertising list support.
+Go probes official agents with omitted, explicit null, and `{}` params and
+checks that empty `session/new` requests still fail required-field validation.
+The TypeScript client sends all three list shapes to Go. The Rust client uses
+the SDK's untyped request API with null and `{}`; its transport canonicalizes
+outgoing null params to omitted. Successful probes record `empty-params:ok` in
+each core trace. This matrix remains stable v1 only; experimental v2 lifecycle
+and payload regressions are Go loopback tests, not official-SDK v2 interop.
+
 External SDK identities are recorded in `versions.json` and mirrored by
 `upstream/lock.json`. Published dependency artifacts are locked by
 `package-lock.json` and `Cargo.lock`; the Rust compiler is selected by the

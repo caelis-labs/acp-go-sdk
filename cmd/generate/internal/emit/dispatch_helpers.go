@@ -13,14 +13,23 @@ func jInvInvalid() Code {
 func jRetToReqErr() Code { return Return(Nil(), Id("toReqErr").Call(Id("err"))) }
 
 // jUnmarshalValidate emits var p T; json.Unmarshal; p.Validate
-func jUnmarshalValidate(typeName string) []Code {
-	return []Code{
+func jUnmarshalValidate(typeName string, request bool) []Code {
+	var code []Code
+	if request {
+		// Official SDKs decode an absent or null request payload as {}. Required
+		// properties are still checked by the generated decoder below.
+		code = append(code, If(
+			Id("len").Call(Qual("bytes", "TrimSpace").Call(Id("params"))).Op("==").Lit(0).Op("||").
+				Qual("bytes", "Equal").Call(Qual("bytes", "TrimSpace").Call(Id("params")), Index().Byte().Call(Lit("null"))),
+		).Block(Id("params").Op("=").Qual("encoding/json", "RawMessage").Call(Lit("{}"))))
+	}
+	return append(code, []Code{
 		Var().Id("p").Id(typeName),
 		If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("params"), Op("&").Id("p")), Id("err").Op("!=").Nil()).
 			Block(jInvInvalid()),
 		If(List(Id("err")).Op(":=").Id("p").Dot("Validate").Call(), Id("err").Op("!=").Nil()).
 			Block(jInvInvalid()),
-	}
+	}...)
 }
 
 func jRequireInboundKind(kind string) Code {

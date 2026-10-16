@@ -34,7 +34,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 		caseBody := []Code{}
 		if mi.Notif != "" {
 			caseBody = append(caseBody, jRequireInboundKind("InboundNotification"))
-			caseBody = append(caseBody, jUnmarshalValidate(mi.Notif)...)
+			caseBody = append(caseBody, jUnmarshalValidate(mi.Notif, false)...)
 			// Special-case: session/cancel should also cancel any in-flight prompt ctx for the session.
 			if mi.Method == "session/cancel" {
 				caseBody = append(
@@ -58,7 +58,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 			caseBody = append(caseBody, jRequireInboundKind("InboundRequest"))
 			respName := strings.TrimSuffix(mi.Req, "Request") + "Response"
 			nullResp := ir.IsNullResponse(schema.Defs[respName])
-			caseBody = append(caseBody, jUnmarshalValidate(mi.Req)...)
+			caseBody = append(caseBody, jUnmarshalValidate(mi.Req, true)...)
 			methodName := strings.TrimSuffix(mi.Req, "Request")
 			pre, recv := jAgentAssert(mi.Binding, methodName, mi.Req, respName, !nullResp)
 			if pre != nil {
@@ -184,7 +184,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 		body := []Code{}
 		if mi.Notif != "" {
 			body = append(body, jRequireInboundKind("InboundNotification"))
-			body = append(body, jUnmarshalValidate(mi.Notif)...)
+			body = append(body, jUnmarshalValidate(mi.Notif, false)...)
 			callName := ir.DispatchMethodNameForNotification(k, mi.Notif)
 			pre, recv := jClientAssert(mi.Binding, callName, mi.Notif, "", false)
 			if pre != nil {
@@ -195,7 +195,7 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 			body = append(body, jRequireInboundKind("InboundRequest"))
 			respName := strings.TrimSuffix(mi.Req, "Request") + "Response"
 			nullResp := ir.IsNullResponse(schema.Defs[respName])
-			body = append(body, jUnmarshalValidate(mi.Req)...)
+			body = append(body, jUnmarshalValidate(mi.Req, true)...)
 			methodName := strings.TrimSuffix(mi.Req, "Request")
 			pre, recv := jClientAssert(mi.Binding, methodName, mi.Req, respName, !nullResp)
 			if pre != nil {
