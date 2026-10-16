@@ -9,6 +9,29 @@ All notable changes to this project are documented in this file.
 
 * **protocol:** align schema 1.26.0 and official SDK peers ([#26](https://github.com/caelis-labs/acp-go-sdk/issues/26)) ([a19e71f](https://github.com/caelis-labs/acp-go-sdk/commit/a19e71feb72ac98c47c83a4704999c034fe9864a)), closes [#25](https://github.com/caelis-labs/acp-go-sdk/issues/25)
 
+### Protocol and compatibility
+
+- Stable ACP remains wire major 1 with unchanged public interfaces. The pinned
+  `schema-v1.26.0` stable schema/meta assets are byte-identical to 1.25.0;
+  provenance constants and exact source locks are updated.
+- Typed optional-only requests accept omitted or null params as `{}`. Required
+  fields remain mandatory and malformed requests still fail before handlers run.
+- Experimental v2 tracks tagged `schema-v2.0.0-alpha.9` in isolation. Entity
+  patches retain omitted/null/value and empty replacements; upsert metadata
+  objects patch by top-level key without nested merging. Native v2 initialize
+  payloads retain extension data through the router, and newer majors negotiate
+  to v2. V1 fallback maps shared capabilities without enabling filesystem or
+  terminal I/O. Prompt insertion ACKs and message updates remain separate from
+  foreground activity completion.
+- Subprocess stdout remains readable after `Process.Wait` until explicit
+  `Close` or `Shutdown`, retaining a fast peer's final protocol frames.
+- Official SDK peers are TypeScript 1.9.0 and Rust 3.4.0. Cross-language
+  conformance covers both roles in all four stable-v1 directions; v2 has Go
+  wire/loopback coverage, not official SDK v2 interoperability evidence.
+
+See [the alignment notes](docs/schema-sdk-alignment-2026-10.md) for patch semantics
+and validation boundaries.
+
 ## [1.5.0](https://github.com/caelis-labs/acp-go-sdk/compare/v1.4.1...v1.5.0) (2026-10-11)
 
 
