@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/ir"
@@ -29,6 +30,14 @@ func displayRecoveryProperties(def *load.Definition) []string {
 		names = []string{"compaction", "notices"}
 	case p["stopReason"] != nil:
 		names = []string{"stopReason", "error"}
+	}
+	if metadataPatchObject(p) {
+		for name, prop := range p {
+			if includesNull(prop) && !slices.Contains(def.Required, name) && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
 	}
 	var result []string
 	for _, name := range names {

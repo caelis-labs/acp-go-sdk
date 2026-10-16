@@ -149,14 +149,15 @@ async function runAgent(options: Options): Promise<void> {
       }
       return {
         protocolVersion: ctx.params.protocolVersion,
-        agentCapabilities: {},
+        agentCapabilities: { sessionCapabilities: { list: {} } },
         authMethods: [],
         agentInfo: {
           name: "typescript-interop-agent",
-          version: "1.8.0",
+          version: "1.9.0",
         },
       };
     })
+    .onRequest(acp.methods.agent.session.list, () => ({ sessions: [] }))
     .onRequest(acp.methods.agent.session.new, () => {
       nextSession += 1;
       const sessionId = `typescript-session-${nextSession}`;
@@ -351,7 +352,7 @@ async function runClient(options: Options): Promise<void> {
         clientCapabilities: { session: { compaction: {}, notices: {} } },
         clientInfo: {
           name: "typescript-interop-client",
-          version: "1.8.0",
+          version: "1.9.0",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;
@@ -362,6 +363,15 @@ async function runClient(options: Options): Promise<void> {
           !capabilities.promptCapabilities?.audio &&
           !capabilities.promptCapabilities?.embeddedContext &&
           !capabilities.promptCapabilities?.image);
+
+      if (options.scenario === "core") {
+        if (!capabilities?.sessionCapabilities?.list) throw new Error("session/list not advertised");
+        for (const params of [undefined, null, {}]) {
+          const listed = await agent.request<{ sessions: unknown[] }>("session/list", params);
+          if (listed.sessions.length !== 0) throw new Error("expected empty session list");
+        }
+        events.push("empty-params:ok");
+      }
 
       const session = await agent.request(acp.methods.agent.session.new, {
         cwd: process.cwd(),

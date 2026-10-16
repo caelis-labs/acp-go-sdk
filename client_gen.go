@@ -3,6 +3,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 )
@@ -32,6 +33,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p CreateElicitationRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -51,6 +55,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 	case ClientMethodFsReadTextFile:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p ReadTextFileRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -72,6 +79,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p WriteTextFileRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -91,6 +101,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 	case ClientMethodSessionRequestPermission:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p RequestPermissionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -123,6 +136,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p CreateTerminalRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -142,6 +158,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 	case ClientMethodTerminalKill:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p KillTerminalRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -163,6 +182,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p TerminalOutputRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -183,6 +205,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p ReleaseTerminalRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -202,6 +227,9 @@ func (c *ClientSideConnection) handle(ctx context.Context, method string, params
 	case ClientMethodTerminalWaitForExit:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p WaitForTerminalExitRequest
 		if err := json.Unmarshal(params, &p); err != nil {

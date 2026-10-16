@@ -23,9 +23,9 @@ func ProtocolVersionFromInitialize(params json.RawMessage) (ProtocolVersion, err
 	return *req.ProtocolVersion, nil
 }
 
-// SelectProtocolVersion returns the v2 version when the peer asked for it.
+// SelectProtocolVersion selects v2 for peers supporting v2 or a newer version.
 func SelectProtocolVersion(requested ProtocolVersion) (ProtocolVersion, error) {
-	if requested == ProtocolVersionNumber {
+	if requested >= ProtocolVersionNumber {
 		return ProtocolVersionNumber, nil
 	}
 	return 0, fmt.Errorf("unsupported protocol version %d, experimental v2 requires %d", requested, ProtocolVersionNumber)
@@ -66,16 +66,40 @@ func (r *ProtocolRouter) Handle(ctx context.Context, method string, params json.
 		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
 	var handler acp.MethodHandler
-	switch requested {
-	case 1:
+	selected := requested
+	switch {
+	case r.V1 != nil && r.V2 == nil:
 		handler = r.V1
-	case ProtocolVersionNumber:
+		selected = 1
+	case requested == 1:
+		handler = r.V1
+	case requested >= ProtocolVersionNumber:
 		handler = r.V2
+		selected = ProtocolVersionNumber
 	default:
 		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unsupported protocol version %d", requested)})
 	}
 	if handler == nil {
 		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("protocol version %d is not configured", requested)})
+	}
+	if selected != requested {
+		// Rewrite only the version. A typed decode/re-encode would discard
+		// future fields and capability payloads needed by a downstream handler.
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(params, &fields); err != nil {
+			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+		}
+		if selected == 1 && requested >= ProtocolVersionNumber {
+			fields, err = v1InitializeFields(params, fields)
+			if err != nil {
+				return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+			}
+		}
+		fields["protocolVersion"] = json.RawMessage(fmt.Sprint(selected))
+		params, err = json.Marshal(fields)
+		if err != nil {
+			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+		}
 	}
 	r.mu.Lock()
 	if r.selected != 0 || r.initialized {
@@ -87,8 +111,60 @@ func (r *ProtocolRouter) Handle(ctx context.Context, method string, params json.
 	result, reqErr := handler(ctx, method, params)
 	r.mu.Lock()
 	if reqErr == nil {
-		r.selected = requested
+		r.selected = selected
 	}
 	r.mu.Unlock()
 	return result, reqErr
+}
+
+// Only shared capabilities survive a fallback to the stable v1 surface.
+// Unknown v2 capabilities must never enable client filesystem or terminal I/O.
+func v1InitializeFields(params json.RawMessage, fields map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	var request InitializeRequest
+	if err := json.Unmarshal(params, &request); err != nil {
+		return nil, err
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	capabilities := make(map[string]json.RawMessage)
+	var source map[string]json.RawMessage
+	if raw := fields["capabilities"]; raw != nil {
+		if err := json.Unmarshal(raw, &source); err != nil {
+			return nil, err
+		}
+	}
+	for _, key := range []string{"elicitation", "_meta"} {
+		if raw := source[key]; raw != nil {
+			capabilities[key] = raw
+		}
+	}
+	if request.Capabilities.Auth != nil {
+		terminal, err := json.Marshal(request.Capabilities.Auth.Terminal != nil)
+		if err != nil {
+			return nil, err
+		}
+		authFields := map[string]json.RawMessage{"terminal": terminal}
+		if request.Capabilities.Auth.Meta != nil {
+			meta, err := json.Marshal(request.Capabilities.Auth.Meta)
+			if err != nil {
+				return nil, err
+			}
+			authFields["_meta"] = meta
+		}
+		auth, err := json.Marshal(authFields)
+		if err != nil {
+			return nil, err
+		}
+		capabilities["auth"] = auth
+	}
+	rawCapabilities, err := json.Marshal(capabilities)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]json.RawMessage{"clientInfo": fields["info"], "clientCapabilities": rawCapabilities}
+	if meta := fields["_meta"]; meta != nil {
+		result["_meta"] = meta
+	}
+	return result, nil
 }

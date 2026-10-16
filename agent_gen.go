@@ -3,6 +3,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 )
@@ -12,6 +13,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 	case AgentMethodAuthenticate:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p AuthenticateRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -33,6 +37,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p InitializeRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -48,6 +55,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 	case AgentMethodLogout:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p LogoutRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -90,6 +100,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p CloseSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -109,6 +122,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 	case AgentMethodSessionDelete:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p DeleteSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -130,6 +146,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p ListSessionsRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -149,6 +168,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 	case AgentMethodSessionLoad:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p LoadSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -170,6 +192,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p NewSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -185,6 +210,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 	case AgentMethodSessionPrompt:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p PromptRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -218,6 +246,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p ResumeSessionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -238,6 +269,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
 		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
+		}
 		var p SetSessionConfigOptionRequest
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, NewInvalidParams(map[string]any{"error": err.Error()})
@@ -257,6 +291,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 	case AgentMethodSessionSetMode:
 		if requestErr := requireInboundKind(ctx, InboundRequest, method); requestErr != nil {
 			return nil, requestErr
+		}
+		if len(bytes.TrimSpace(params)) == 0 || bytes.Equal(bytes.TrimSpace(params), []byte("null")) {
+			params = json.RawMessage("{}")
 		}
 		var p SetSessionModeRequest
 		if err := json.Unmarshal(params, &p); err != nil {

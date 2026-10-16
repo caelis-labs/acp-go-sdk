@@ -1,19 +1,19 @@
 {
   "protocol": {
     "repository": "https://github.com/agentclientprotocol/agent-client-protocol",
-    "stableTag": "schema-v1.25.0",
-    "stableCommit": "4cf3dd858c819fc3ab99ae53f76883ede0345a10",
-    "v2Tag": "schema-v2.0.0-alpha.8",
-    "v2Commit": "4cf3dd858c819fc3ab99ae53f76883ede0345a10"
+    "stableTag": "schema-v1.26.0",
+    "stableCommit": "e2d83349bc9e28a4059ea3acefa1c91c966f74e2",
+    "v2Tag": "schema-v2.0.0-alpha.9",
+    "v2Commit": "e2d83349bc9e28a4059ea3acefa1c91c966f74e2"
   },
   "typescriptSdk": {
     "repository": "https://github.com/agentclientprotocol/typescript-sdk",
-    "tag": "v1.8.0",
-    "commit": "f4ea219505fcafcb3fa63e00f1c24559755c4b6b"
+    "tag": "v1.9.0",
+    "commit": "1db4d43286d993545e729376346b7f9098748159"
   },
   "rustSdk": {
     "repository": "https://github.com/agentclientprotocol/rust-sdk",
-    "tag": "v3.3.0",
-    "commit": "199532c7433f1aec207dd0cada299901a5621ece"
+    "tag": "v3.4.0",
+    "commit": "4f82aef0e7559a50c2b95aff4f7ba60af10d9e04"
   }
 }

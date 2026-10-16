@@ -8,16 +8,17 @@ use std::time::{Duration, Instant};
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, ClientCapabilities, ClientSessionCapabilities,
     CompactionCapabilities, CompactionStatus, CompactionSummaryChunk, CompactionUpdate,
-    ContentBlock, ContentChunk, InitializeRequest, InitializeResponse, Meta, NewSessionRequest,
-    NewSessionResponse, Notice, NoticeCapabilities, NoticeSeverity, PermissionOption,
-    PermissionOptionKind, PromptRequest, PromptResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
+    ContentBlock, ContentChunk, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, Meta, NewSessionRequest, NewSessionResponse, Notice, NoticeCapabilities,
+    NoticeSeverity, PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionCapabilities, SessionId, SessionListCapabilities,
     SessionNotification, SessionUpdate, StopReason, TextContent, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Responder, Stdio,
+    AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Responder, Stdio, UntypedMessage,
 };
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -297,9 +298,20 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
                     return Err(agent_client_protocol::Error::invalid_params());
                 }
                 responder.respond(
-                    InitializeResponse::new(request.protocol_version)
-                        .agent_capabilities(AgentCapabilities::new()),
+                    InitializeResponse::new(request.protocol_version).agent_capabilities(
+                        AgentCapabilities::new().session_capabilities(
+                            SessionCapabilities::new().list(SessionListCapabilities::new()),
+                        ),
+                    ),
                 )
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: ListSessionsRequest,
+                        responder: Responder<ListSessionsResponse>,
+                        _connection| {
+                responder.respond(ListSessionsResponse::new(vec![]))
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -519,6 +531,32 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
                         .prompt_capabilities
                         .embedded_context
                     && !initialized.agent_capabilities.prompt_capabilities.image;
+                if matches!(scenario, Scenario::Core) {
+                    if initialized
+                        .agent_capabilities
+                        .session_capabilities
+                        .list
+                        .is_none()
+                    {
+                        return Err(agent_client_protocol::Error::invalid_params()
+                            .data("session/list not advertised"));
+                    }
+                    // The official Rust transport canonicalizes null params to omitted.
+                    for params in [serde_json::Value::Null, serde_json::json!({})] {
+                        let listed = connection
+                            .send_request(UntypedMessage::new("session/list", params)?)
+                            .block_task()
+                            .await?;
+                        if listed["sessions"] != serde_json::json!([]) {
+                            return Err(agent_client_protocol::Error::invalid_params()
+                                .data("expected empty session list"));
+                        }
+                    }
+                    events
+                        .lock()
+                        .expect("events mutex poisoned")
+                        .push("empty-params:ok".into());
+                }
                 let session = connection
                     .send_request(NewSessionRequest::new(std::env::current_dir().map_err(
                         |error| {
