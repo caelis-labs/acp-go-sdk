@@ -29,6 +29,12 @@ outgoing null params to omitted. Successful probes record `empty-params:ok` in
 each core trace. This matrix remains stable v1 only; experimental v2 lifecycle
 and payload regressions are Go loopback tests, not official-SDK v2 interop.
 
+The TypeScript peer uses SDK 2.0.0's default stable ACP v1 entrypoint and the
+`agent()` / `client()` app APIs. Its session/list, notices, compaction, permission
+and cancellation features are all present in that stable profile; no `/unstable`
+import is needed. SDK package major 2 does not select ACP wire major 2. The Go
+stable API and the separately pinned experimental v2 schema remain unchanged.
+
 External SDK identities are recorded in `versions.json` and mirrored by
 `upstream/lock.json`. Published dependency artifacts are locked by
 `package-lock.json` and `Cargo.lock`; the Rust compiler is selected by the

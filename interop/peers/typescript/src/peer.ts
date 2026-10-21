@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+// SDK 2.x defaults to stable ACP v1. All features exercised here are stable;
+// keep apps, methods and types on this entrypoint rather than opting into /unstable.
 import * as acp from "@agentclientprotocol/sdk";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, rename, writeFile } from "node:fs/promises";
@@ -153,7 +155,7 @@ async function runAgent(options: Options): Promise<void> {
         authMethods: [],
         agentInfo: {
           name: "typescript-interop-agent",
-          version: "1.9.0",
+          version: "2.0.0",
         },
       };
     })
@@ -352,7 +354,7 @@ async function runClient(options: Options): Promise<void> {
         clientCapabilities: { session: { compaction: {}, notices: {} } },
         clientInfo: {
           name: "typescript-interop-client",
-          version: "1.9.0",
+          version: "2.0.0",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;

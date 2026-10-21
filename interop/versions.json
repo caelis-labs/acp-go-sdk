@@ -2,10 +2,10 @@
   "typescript": {
     "package": "@agentclientprotocol/sdk",
     "repository": "https://github.com/agentclientprotocol/typescript-sdk",
-    "version": "1.9.0",
-    "tag": "v1.9.0",
-    "commit": "1db4d43286d993545e729376346b7f9098748159",
-    "integrity": "sha512-saCOTPYBK1iqWqJFAYHXbg3+zCoFXyZZFoqQAwdTWkbrZZPpAETr80QOnYr2l+dzPwL0jpNhn3eDY8MoEIDbUA=="
+    "version": "2.0.0",
+    "tag": "v2.0.0",
+    "commit": "c2b1a8633745dd859a2732b4e17d5ed61e869bb6",
+    "integrity": "sha512-Za5gWOPQ44aBOdegDJZ+OjCAPn7POc0cw8BlFJQ1mmUY1OoUWxRi3+QZT4gdZnyEWgKXyfeGRb0Oo1ag9YkQ1w=="
   },
   "rust": {
     "package": "agent-client-protocol",
