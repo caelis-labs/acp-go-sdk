@@ -7,7 +7,7 @@
     "build": "tsc --project tsconfig.json"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "2.0.1"
+    "@agentclientprotocol/sdk": "2.0.2"
   },
   "devDependencies": {
     "@types/node": "24.3.0",

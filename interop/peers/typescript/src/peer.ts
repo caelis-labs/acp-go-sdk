@@ -155,7 +155,7 @@ async function runAgent(options: Options): Promise<void> {
         authMethods: [],
         agentInfo: {
           name: "typescript-interop-agent",
-          version: "2.0.1",
+          version: "2.0.2",
         },
       };
     })
@@ -354,7 +354,7 @@ async function runClient(options: Options): Promise<void> {
         clientCapabilities: { session: { compaction: {}, notices: {} } },
         clientInfo: {
           name: "typescript-interop-client",
-          version: "2.0.1",
+          version: "2.0.2",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;
