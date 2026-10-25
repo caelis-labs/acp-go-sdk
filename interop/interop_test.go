@@ -161,10 +161,10 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "2.0.1" ||
-		locked.TypeScript.Tag != "v2.0.1" ||
-		locked.TypeScript.Commit != "2ab61518f7079ef5f6c7a961f0ebcab23ef5f59d" ||
-		locked.TypeScript.Integrity != "sha512-v4E/NcBTGFEKmorGso8ysAjJTkNh5UMJPP4aDznyMNmnP9t10g/aCCo/Djy7RYaYZy5ZROFK3G5cEj9tDgGOTQ==" {
+		locked.TypeScript.Version != "2.0.2" ||
+		locked.TypeScript.Tag != "v2.0.2" ||
+		locked.TypeScript.Commit != "f2f218d314ee8f42c37c466b55d2b917ddc0006c" ||
+		locked.TypeScript.Integrity != "sha512-jLywRB42hZMRMc4aUgt0uRjkY9FQnMdybv4XgLl+ddi75QuJn8Vbl0+CHcVHJDC0+WDfi1KQXRWtHaR5vp6gHw==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
