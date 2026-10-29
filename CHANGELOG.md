@@ -9,6 +9,27 @@ All notable changes to this project are documented in this file.
 
 * **protocol:** align schema 1.27.0 and official SDK peers ([#37](https://github.com/caelis-labs/acp-go-sdk/issues/37)) ([2ce1ede](https://github.com/caelis-labs/acp-go-sdk/commit/2ce1edea83b28b77cdf69e57bd34fcff0fe21415))
 
+
+### Protocol and compatibility
+
+- Stable ACP remains wire major 1. The public stable API is unchanged apart
+  from schema provenance constants; the schema pin is `schema-v1.27.0`.
+- Experimental v2 now tracks `schema-v2.0.0-alpha.10`. Its API may change
+  incompatibly: construct available commands through the `Command` union
+  branch (`type: "command"`), use `ClientAuthCapabilities`, and migrate terminal
+  exit codes to signed int64 and resource sizes to uint64. Request IDs cannot
+  be null. Elicitation requires exactly one session/request scope.
+- V2 initialization selects the highest supported version at or below the
+  requested version, returns `-32022` when no version is supported, and allows
+  repeated initialization before another request. Replacement lists, nullable
+  patches, metadata and terminal sizes follow the pinned schema semantics.
+- Official SDK peers are TypeScript 2.1.0 and Rust 3.6.0. All four stable-v1
+  stdio directions cover core, session cancellation and request cancellation.
+  Experimental v2 has Go wire/loopback coverage, not official-SDK v2 interop.
+
+See the [alignment and migration notes](https://github.com/caelis-labs/acp-go-sdk/blob/v1.5.2/docs/schema-sdk-alignment-2026-10-29.md)
+for the full compatibility changes and validation boundaries.
+
 ## [1.5.1](https://github.com/caelis-labs/acp-go-sdk/compare/v1.5.0...v1.5.1) (2026-10-16)
 
 
