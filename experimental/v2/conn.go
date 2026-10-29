@@ -13,6 +13,7 @@ import (
 
 // AgentSideConnection is the experimental v2 agent view of a connection.
 type AgentSideConnection struct {
+	initialization
 	conn  *acp.Connection
 	agent Agent
 }
@@ -90,7 +91,7 @@ func (c *ClientSideConnection) Initialize(ctx context.Context, params Initialize
 	if err != nil {
 		return InitializeResponse{}, err
 	}
-	if response.ProtocolVersion != ProtocolVersionNumber {
+	if response.ProtocolVersion != ProtocolVersionNumber || response.ProtocolVersion > params.ProtocolVersion {
 		return InitializeResponse{}, acp.NewInvalidParams(map[string]any{"error": "agent selected an unsupported protocol version", "protocolVersion": response.ProtocolVersion})
 	}
 	return response, nil
@@ -145,25 +146,18 @@ func (c *AgentSideConnection) CompleteElicitation(ctx context.Context, params Co
 }
 
 func (a *AgentSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
+	if err := validateRequestID(ctx); err != nil {
+		return nil, err
+	}
+	if method != AgentMethodInitialize {
+		_, _ = a.route(ctx)
+	}
 	switch method {
 	case AgentMethodInitialize:
 		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
 			return nil, err
 		}
-		req, reqErr := decodeParams[InitializeRequest](params)
-		if reqErr != nil {
-			return nil, reqErr
-		}
-		selected, err := SelectProtocolVersion(req.ProtocolVersion)
-		if err != nil {
-			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
-		}
-		req.ProtocolVersion = selected
-		resp, err := a.agent.Initialize(ctx, req)
-		if err != nil {
-			return nil, toRequestError(err)
-		}
-		return resp, nil
+		return a.initialize(ctx, params)
 	case AgentMethodSessionNew:
 		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
 			return nil, err
@@ -319,6 +313,9 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 }
 
 func (c *ClientSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
+	if err := validateRequestID(ctx); err != nil {
+		return nil, err
+	}
 	switch method {
 	case ClientMethodSessionUpdate:
 		if err := requireInboundKind(ctx, acp.InboundNotification, method); err != nil {

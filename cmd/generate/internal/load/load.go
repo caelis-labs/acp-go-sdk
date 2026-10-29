@@ -21,7 +21,8 @@ type Meta struct {
 
 // Schema is a minimal view over schema/schema.json definitions used by the generator.
 type Schema struct {
-	Defs map[string]*Definition `json:"$defs"`
+	Version int                    `json:"-"` // Wire major from the pinned meta.json.
+	Defs    map[string]*Definition `json:"$defs"`
 }
 
 // Discriminator specifies which property distinguishes union variants.
@@ -46,6 +47,7 @@ type Definition struct {
 	DocsIgnore  bool                   `json:"x-docs-ignore"`
 	Title       string                 `json:"title"`
 	Const       any                    `json:"const"`
+	Minimum     *int64                 `json:"minimum"`
 	MinLength   int                    `json:"minLength"`
 	XSide       string                 `json:"x-side"`
 	XMethod     string                 `json:"x-method"`
@@ -54,6 +56,7 @@ type Definition struct {
 	Default any `json:"default"`
 	// DeserializeDefaultOnError and DeserializeSkipInvalidItems describe
 	// receiver-side recovery for schema fields, independently of JSON defaults.
+	DeserializeDefaultOnNull    bool `json:"x-deserialize-default-on-null"`
 	DeserializeDefaultOnError   bool `json:"x-deserialize-default-on-error"`
 	DeserializeSkipInvalidItems bool `json:"x-deserialize-skip-invalid-items"`
 	// Discriminator specifies which property name distinguishes union variants.

@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -10,8 +11,8 @@ import (
 )
 
 func TestInitialAvailableCommandsDecode(t *testing.T) {
-	const first = `{"name":"first","description":"First command"}`
-	const last = `{"name":"last","description":"Last command","input":{"type":"text","hint":"Query"}}`
+	const first = `{"type":"command","name":"first","description":"First command"}`
+	const last = `{"type":"command","name":"last","description":"Last command","input":{"type":"text","hint":"Query"}}`
 	for _, method := range []string{"new", "resume"} {
 		t.Run(method, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -31,7 +32,7 @@ func TestInitialAvailableCommandsDecode(t *testing.T) {
 				{"mixed", `,"availableCommands":[` + first + `,null,{},[],false,42,"bad",{"name":null,"description":"bad"},{"name":42,"description":"bad"},{"name":"bad-input","description":"bad","input":{"type":"text"}},` + last + `]`, []string{"first", "last"}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					stale := []AvailableCommand{{Name: "stale", Description: "Must be reset"}}
+					stale := []AvailableCommand{commandForTest("stale", "Must be reset")}
 					var response any
 					if method == "new" {
 						response = &NewSessionResponse{AvailableCommands: stale}
@@ -54,7 +55,7 @@ func TestInitialAvailableCommandsDecode(t *testing.T) {
 					}
 					var names []string
 					for _, command := range commands {
-						names = append(names, command.Name)
+						names = append(names, command.Command.Name)
 					}
 					if !reflect.DeepEqual(names, tc.want) {
 						t.Fatalf("commands = %v, want %v", names, tc.want)
@@ -81,7 +82,7 @@ func TestInitialAvailableCommandsDecode(t *testing.T) {
 
 func TestInitialAvailableCommandsPreserveExtensions(t *testing.T) {
 	for _, inputType := range []string{"_custom", "future"} {
-		command := `{"_meta":{"sequence":9007199254740993},"description":"Extension","input":{"type":"` + inputType + `","payload":{"sequence":9007199254740993},"_meta":{"opaque":true}},"name":"extension"}`
+		command := `{"type":"command","_meta":{"sequence":9007199254740993},"description":"Extension","input":{"type":"` + inputType + `","payload":{"sequence":9007199254740993},"_meta":{"opaque":true}},"name":"extension"}`
 		for _, response := range []any{&NewSessionResponse{}, &ResumeSessionResponse{}} {
 			if err := json.Unmarshal([]byte(`{"sessionId":"s","availableCommands":[`+command+`]}`), response); err != nil {
 				t.Fatal(err)
@@ -96,7 +97,7 @@ func TestInitialAvailableCommandsPreserveExtensions(t *testing.T) {
 			if err := json.Unmarshal(encoded, &object); err != nil {
 				t.Fatal(err)
 			}
-			if len(object.Commands) != 1 || string(object.Commands[0]) != command {
+			if len(object.Commands) != 1 || !jsonEqualForTest(object.Commands[0], []byte(command)) {
 				t.Fatalf("extension changed: %s", encoded)
 			}
 		}
@@ -104,13 +105,13 @@ func TestInitialAvailableCommandsPreserveExtensions(t *testing.T) {
 }
 
 func TestInitialCommandsRecoveryDoesNotRelaxOtherFields(t *testing.T) {
-	for _, input := range []string{`{}`, `{"sessionId":null}`, `{"sessionId":42}`, `{"sessionId":"s","configOptions":"bad"}`, `{"sessionId":"s","_meta":42}`, `{"sessionId":"s","availableCommands":[}`} {
+	for _, input := range []string{`{}`, `{"sessionId":null}`, `{"sessionId":42}`, `{"sessionId":"s","availableCommands":[}`} {
 		var response NewSessionResponse
 		if err := json.Unmarshal([]byte(input), &response); err == nil {
 			t.Fatalf("accepted invalid new session: %s", input)
 		}
 	}
-	for _, input := range []string{`{"configOptions":"bad"}`, `{"_meta":42}`, `{"availableCommands":[}`} {
+	for _, input := range []string{`{"availableCommands":[}`} {
 		var response ResumeSessionResponse
 		if err := json.Unmarshal([]byte(input), &response); err == nil {
 			t.Fatalf("accepted invalid resume session: %s", input)
@@ -147,7 +148,7 @@ func TestV2InitialCommandsAndReplacementNotifications(t *testing.T) {
 	for _, method := range []string{"new", "resume"} {
 		t.Run(method, func(t *testing.T) {
 			a, b := net.Pipe()
-			initial := []AvailableCommand{{Name: "first", Description: "First"}, {Name: "second", Description: "Second"}}
+			initial := []AvailableCommand{commandForTest("first", "First"), commandForTest("second", "Second")}
 			agent, err := NewAgentSideConnection(commandsAgent{commands: initial}, a, a)
 			if err != nil {
 				t.Fatal(err)
@@ -178,7 +179,7 @@ func TestV2InitialCommandsAndReplacementNotifications(t *testing.T) {
 			if !reflect.DeepEqual(commands, initial) {
 				t.Fatalf("initial commands = %+v", commands)
 			}
-			for _, replacement := range [][]AvailableCommand{{{Name: "replacement", Description: "Replacement"}}, {}} {
+			for _, replacement := range [][]AvailableCommand{{commandForTest("replacement", "Replacement")}, {}} {
 				if err := agent.SessionUpdate(ctx, UpdateSessionNotification{SessionId: "s", Update: SessionUpdate{AvailableCommandsUpdate: &SessionAvailableCommandsUpdate{AvailableCommands: replacement}}}); err != nil {
 					t.Fatal(err)
 				}
@@ -186,7 +187,7 @@ func TestV2InitialCommandsAndReplacementNotifications(t *testing.T) {
 			for _, want := range []int{1, 0} {
 				select {
 				case commands = <-updates:
-					if len(commands) != want || (want == 1 && commands[0].Name != "replacement") {
+					if len(commands) != want || (want == 1 && commands[0].Command.Name != "replacement") {
 						t.Fatalf("replacement commands = %+v, want length %d", commands, want)
 					}
 				case <-ctx.Done():
@@ -195,4 +196,19 @@ func TestV2InitialCommandsAndReplacementNotifications(t *testing.T) {
 			}
 		})
 	}
+}
+
+func commandForTest(name, description string) AvailableCommand {
+	return AvailableCommand{Command: &AvailableCommandCommand{Type: "command", Name: name, Description: description}}
+}
+func jsonEqualForTest(a, b []byte) bool {
+	var x, y any
+	d := json.NewDecoder(bytes.NewReader(a))
+	d.UseNumber()
+	if d.Decode(&x) != nil {
+		return false
+	}
+	d = json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	return d.Decode(&y) == nil && reflect.DeepEqual(x, y)
 }

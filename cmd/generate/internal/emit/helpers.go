@@ -100,6 +100,19 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 				ref = v.AllOf[0].Ref
 			}
 			v = expandAllOf(schema, v)
+			if ref != "" && len(def.Properties) > 0 {
+				ref = ""
+				copyDef := *v
+				copyDef.Properties = make(map[string]*load.Definition)
+				for key, prop := range v.Properties {
+					copyDef.Properties[key] = prop
+				}
+				for key, prop := range def.Properties {
+					copyDef.Properties[key] = prop
+				}
+				copyDef.Required = append(append([]string(nil), v.Required...), def.Required...)
+				v = &copyDef
+			}
 
 			// Compute type name matching the types emitter (emitUnion)
 			tname := ""

@@ -3,18 +3,28 @@ package emit
 import (
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/ir"
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/load"
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/util"
 )
 
-// Limit receiver recovery to the newly stabilized display fields. Older fields
-// retain their established decoding behavior. Executable/session inputs are
-// deliberately strict, including null elements in otherwise valid arrays.
-func displayRecoveryProperties(def *load.Definition) []string {
+// Stable receivers retain their established recovery policy. Experimental v2
+// follows every recovery hint in its pinned schema. Executable/session inputs
+// remain strict, including null elements in otherwise valid arrays.
+func displayRecoveryProperties(schema *load.Schema, def *load.Definition) []string {
 	var names []string
 	p := def.Properties
+	if schema.Version == 2 {
+		for name, prop := range p {
+			if prop.DeserializeDefaultOnError || prop.DeserializeSkipInvalidItems || ir.PrimaryType(prop) == "null" {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		return names
+	}
 	switch {
 	case def.XMethod == "initialize" && p["authMethods"] != nil:
 		// Dropping an unusable terminal auth method must not turn it into
@@ -48,8 +58,8 @@ func displayRecoveryProperties(def *load.Definition) []string {
 	return result
 }
 
-func emitDisplayRecoveryDecode(g *Group, def *load.Definition) {
-	names := displayRecoveryProperties(def)
+func emitDisplayRecoveryDecode(g *Group, schema *load.Schema, def *load.Definition) {
+	names := displayRecoveryProperties(schema, def)
 	if len(names) == 0 {
 		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
 		return
@@ -69,6 +79,12 @@ func emitDisplayRecoveryDecode(g *Group, def *load.Definition) {
 				return // The idle "none" variant ignores a malformed stop reason.
 			}
 			if ir.PrimaryType(prop) == "array" && prop.DeserializeSkipInvalidItems {
+				if !prop.DeserializeDefaultOnError {
+					h.If(List(Id("rawValue"), Id("present")).Op(":=").Id("m").Index(Lit(name)), Id("present")).BlockFunc(func(check *Group) {
+						check.Var().Id("items").Index().Qual("encoding/json", "RawMessage")
+						check.If(Qual("encoding/json", "Unmarshal").Call(Id("rawValue"), Op("&").Id("items")).Op("!=").Nil().Op("||").Id("items").Op("==").Nil()).Block(Return(Qual("fmt", "Errorf").Call(Lit(name + " must be an array"))))
+					})
+				}
 				h.Var().Id("items").Index().Qual("encoding/json", "RawMessage")
 				h.If(Qual("encoding/json", "Unmarshal").Call(Id("raw").Dot(field), Op("&").Id("items")).Op("==").Nil().Op("&&").Id("items").Op("!=").Nil()).BlockFunc(func(array *Group) {
 					array.Id("a").Dot(field).Op("=").Make(jenTypeFor(prop), Lit(0), Id("len").Call(Id("items")))
@@ -83,7 +99,11 @@ func emitDisplayRecoveryDecode(g *Group, def *load.Definition) {
 				// Decode into a temporary: encoding/json may partially populate a
 				// value before returning an error, which must not leak into recovery.
 				h.Var().Id("value").Add(jenTypeForProperty(name, prop))
-				h.If(Qual("encoding/json", "Unmarshal").Call(Id("raw").Dot(field), Op("&").Id("value")).Op("==").Nil()).Block(
+				condition := Qual("encoding/json", "Unmarshal").Call(Id("raw").Dot(field), Op("&").Id("value")).Op("==").Nil()
+				if prop.Minimum != nil && includesNull(prop) {
+					condition = condition.Op("&&").Parens(Id("value").Op("==").Nil().Op("||").Op("*").Id("value").Op(">=").Lit(int(*prop.Minimum)))
+				}
+				h.If(condition).Block(
 					Id("a").Dot(field).Op("=").Id("value"),
 				)
 			}
@@ -99,7 +119,7 @@ func strictReceiverProperties(def *load.Definition) []string {
 		names = []string{"args", "env", "cwd", "outputByteLimit"}
 	case def.XMethod == "fs/read_text_file":
 		names = []string{"line", "limit"}
-	case p["mcpServers"] != nil && p["cwd"] != nil:
+	case p["cwd"] != nil && (p["mcpServers"] != nil || (p["additionalDirectories"] != nil && !p["additionalDirectories"].DeserializeDefaultOnError)):
 		names = []string{"mcpServers", "additionalDirectories"}
 	case p["args"] != nil && p["env"] != nil && (p["command"] != nil || p["id"] != nil):
 		names = []string{"args", "env"}
@@ -113,13 +133,8 @@ func strictReceiverProperties(def *load.Definition) []string {
 // JSON Schema describes their non-null shape. Malformed non-null values remain
 // errors; null is empty, and null elements are never silently coerced.
 func receiverNullIsEmpty(def *load.Definition, name string) bool {
-	for _, strict := range strictReceiverProperties(def) {
-		if strict == name {
-			prop := def.Properties[name]
-			return prop != nil && (ir.PrimaryType(prop) == "array" || ir.PrimaryType(prop) == "object")
-		}
-	}
-	return false
+	prop := def.Properties[name]
+	return prop != nil && (prop.DeserializeDefaultOnNull || (ir.PrimaryType(prop) == "array" && strings.Contains(prop.Description, "Omitted, `null`, and empty")))
 }
 
 func emitReceiverNullDefaults(g *Group, def *load.Definition) {
@@ -153,6 +168,14 @@ func emitReceiverPropertyChecks(g *Group, schema *load.Schema, def *load.Definit
 	sort.Strings(keys)
 	for _, name := range keys {
 		prop := def.Properties[name]
+		if prop.Minimum != nil && *prop.Minimum > 0 && !slices.Contains(displayRecoveryProperties(schema, def), name) {
+			g.BlockFunc(func(h *Group) {
+				h.If(List(Id("raw"), Id("ok")).Op(":=").Id("m").Index(Lit(name)), Id("ok")).Block(
+					Var().Id("value").Int64(),
+					If(Qual("encoding/json", "Unmarshal").Call(Id("raw"), Op("&").Id("value")).Op("!=").Nil().Op("||").Id("value").Op("<").Lit(int(*prop.Minimum))).Block(Return(Qual("fmt", "Errorf").Call(Lit(name+" is out of range")))),
+				)
+			})
+		}
 		if prop.MinLength <= 0 {
 			continue
 		}
@@ -167,12 +190,12 @@ func emitReceiverPropertyChecks(g *Group, schema *load.Schema, def *load.Definit
 	}
 }
 
-func needsReceiverDecode(def *load.Definition) bool {
-	if len(strictReceiverProperties(def)) > 0 || len(displayRecoveryProperties(def)) > 0 {
+func needsReceiverDecode(schema *load.Schema, def *load.Definition) bool {
+	if len(strictReceiverProperties(def)) > 0 || len(displayRecoveryProperties(schema, def)) > 0 {
 		return true
 	}
 	for _, prop := range def.Properties {
-		if prop.MinLength > 0 || ir.PrimaryType(prop) == "null" {
+		if (prop.Minimum != nil && *prop.Minimum > 0) || prop.MinLength > 0 || ir.PrimaryType(prop) == "null" {
 			return true
 		}
 	}

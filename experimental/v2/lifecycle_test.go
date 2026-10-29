@@ -197,8 +197,8 @@ func TestV2RejectsNonV2Initialize(t *testing.T) {
 		t.Fatal("expected initialize to reject protocol version 1")
 	}
 	var reqErr *acp.RequestError
-	if !errors.As(err, &reqErr) || reqErr.Code != -32602 {
-		t.Fatalf("error = %v, want invalid params", err)
+	if !errors.As(err, &reqErr) || reqErr.Code != -32022 {
+		t.Fatalf("error = %v, want unsupported protocol version", err)
 	}
 }
 
