@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 )
@@ -38,17 +37,21 @@ type ProtocolRouter struct {
 	V1 acp.MethodHandler
 	V2 acp.MethodHandler
 
-	mu          sync.Mutex
-	selected    ProtocolVersion
-	initialized bool
+	initialization
 }
 
 // Handle implements acp.MethodHandler.
 func (r *ProtocolRouter) Handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	if method != AgentMethodInitialize {
-		r.mu.Lock()
-		selected := r.selected
-		r.mu.Unlock()
+		selected, pending := r.route(ctx)
+		if pending {
+			return nil, acp.NewInvalidRequest(nil)
+		}
+		if selected == 2 {
+			if err := validateRequestID(ctx); err != nil {
+				return nil, err
+			}
+		}
 		switch selected {
 		case 1:
 			return r.V1(ctx, method, params)
@@ -65,23 +68,41 @@ func (r *ProtocolRouter) Handle(ctx context.Context, method string, params json.
 	if err != nil {
 		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
+	if err := r.checkRepeatVersion(requested); err != nil {
+		return nil, err
+	}
 	var handler acp.MethodHandler
-	selected := requested
+	selected := ProtocolVersion(0)
 	switch {
 	case r.V1 != nil && r.V2 == nil:
-		handler = r.V1
-		selected = 1
-	case requested == 1:
-		handler = r.V1
-	case requested >= ProtocolVersionNumber:
-		handler = r.V2
-		selected = ProtocolVersionNumber
-	default:
-		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unsupported protocol version %d", requested)})
+		handler, selected = r.V1, 1 // Legacy v1-only fallback.
+	case requested >= 2 && r.V2 != nil:
+		handler, selected = r.V2, 2
+	case requested >= 1 && r.V1 != nil:
+		handler, selected = r.V1, 1
 	}
 	if handler == nil {
-		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("protocol version %d is not configured", requested)})
+		supported := []ProtocolVersion{}
+		if r.V1 != nil {
+			supported = append(supported, 1)
+		}
+		if r.V2 != nil {
+			supported = append(supported, 2)
+		}
+		return nil, NewUnsupportedProtocolVersion(requested, supported)
 	}
+	if selected == 2 {
+		if err := validateRequestID(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if selected == 2 || (selected == 1 && requested >= 2) {
+		params, err = normalizeInitialize(params, requested, selected)
+		if err != nil {
+			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+		}
+	}
+
 	if selected != requested {
 		// Rewrite only the version. A typed decode/re-encode would discard
 		// future fields and capability payloads needed by a downstream handler.
@@ -101,19 +122,11 @@ func (r *ProtocolRouter) Handle(ctx context.Context, method string, params json.
 			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 		}
 	}
-	r.mu.Lock()
-	if r.selected != 0 || r.initialized {
-		r.mu.Unlock()
-		return nil, acp.NewInvalidRequest(map[string]any{"error": "initialize has already been received"})
+	if err := r.begin(selected); err != nil {
+		return nil, err
 	}
-	r.initialized = true
-	r.mu.Unlock()
 	result, reqErr := handler(ctx, method, params)
-	r.mu.Lock()
-	if reqErr == nil {
-		r.selected = selected
-	}
-	r.mu.Unlock()
+	r.finish(selected, reqErr)
 	return result, reqErr
 }
 

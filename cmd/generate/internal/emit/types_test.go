@@ -205,7 +205,7 @@ func TestNullablePresencePropertiesRequireExplicitClearSemantics(t *testing.T) {
 			Type:        []any{"string", "null"},
 		},
 	}
-	got := nullablePresenceProperties(properties, map[string]struct{}{"required": {}})
+	got := nullablePresenceProperties(&load.Schema{}, properties, map[string]struct{}{"required": {}})
 	if len(got) != 2 || got[0].propName != "name" || got[0].presentName != "hasName" || got[1].propName != "title" || got[1].presentName != "hasTitle" {
 		t.Fatalf("nullable presence properties = %#v", got)
 	}
@@ -235,7 +235,7 @@ func TestCompactionPatchPresenceIncludesCollections(t *testing.T) {
 		"error":   {Type: []any{"string", "null"}},
 		"_meta":   {Type: []any{"object", "null"}, AdditionalProperties: true},
 	}
-	got := nullablePresenceProperties(properties, nil)
+	got := nullablePresenceProperties(&load.Schema{}, properties, nil)
 	if len(got) != 3 || got[0].propName != "_meta" || got[0].indirect || got[1].propName != "error" || !got[1].indirect || got[2].propName != "summary" || got[2].indirect {
 		t.Fatalf("patch properties=%+v", got)
 	}
