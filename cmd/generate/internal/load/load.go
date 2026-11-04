@@ -49,6 +49,7 @@ type Definition struct {
 	Const       any                    `json:"const"`
 	Minimum     *int64                 `json:"minimum"`
 	MinLength   int                    `json:"minLength"`
+	MinItems    int                    `json:"minItems"`
 	XSide       string                 `json:"x-side"`
 	XMethod     string                 `json:"x-method"`
 	// Default holds the JSON Schema default value, when present.

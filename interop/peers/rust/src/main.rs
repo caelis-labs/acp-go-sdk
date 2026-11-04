@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, CancelNotification, ClientCapabilities, ClientSessionCapabilities,
     CompactionCapabilities, CompactionStatus, CompactionSummaryChunk, CompactionUpdate,
     ContentBlock, ContentChunk, InitializeRequest, InitializeResponse, ListSessionsRequest,
@@ -16,10 +17,8 @@ use agent_client_protocol::schema::v1::{
     SessionNotification, SessionUpdate, StopReason, TextContent, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };
-use agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
-use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Responder, Stdio, UntypedMessage,
-};
+use agent_client_protocol::v1::{ConnectionTo, Responder};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, Stdio, UntypedMessage};
 use serde::Serialize;
 use tokio::sync::oneshot;
 
@@ -285,7 +284,7 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
     let result_path = options.result_path.clone();
 
     Agent
-        .builder()
+        .v1()
         .name("acp-go-sdk-rust-interop-agent")
         .on_receive_request(
             async move |request: InitializeRequest,
@@ -469,7 +468,7 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
     let scenario = options.scenario;
 
     let (protocol_version, capabilities_unsupported, session_id, stop_reason, error_code) = Client
-        .builder()
+        .v1()
         .on_receive_notification(
             {
                 let events = Arc::clone(&events);

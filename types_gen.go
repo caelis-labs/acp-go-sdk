@@ -488,7 +488,7 @@ type AuthMethodTerminalInline struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Additional arguments to append to the configured agent invocation for terminal auth.
 	Args []string `json:"args,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	Description *string `json:"description,omitempty"`
 	// Additional environment variables to set on the configured agent invocation for terminal auth.
 	// These values override same-named variables in the base launch configuration.
@@ -766,7 +766,7 @@ type AuthMethodAgent struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	Description *string `json:"description,omitempty"`
 	// Unique identifier for this authentication method.
 	Id AuthMethodId `json:"id"`
@@ -815,7 +815,7 @@ type AuthMethodId string
 // The client runs the configured agent program as a separate interactive
 // process for the user to authenticate via a TUI. Agents MUST advertise this
 // method only when the client enabled its terminal authentication capability.
-// A zero exit status signals success; any other termination signals failure.
+// A zero exit status signals success. Any other termination signals failure.
 // The client MUST NOT pass this method to 'authenticate'.
 type AuthMethodTerminal struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -826,7 +826,7 @@ type AuthMethodTerminal struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Additional arguments to append to the configured agent invocation for terminal auth.
 	Args []string `json:"args,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	Description *string `json:"description,omitempty"`
 	// Additional environment variables to set on the configured agent invocation for terminal auth.
 	// These values override same-named variables in the base launch configuration.
@@ -1642,7 +1642,7 @@ type ClientSessionCapabilities struct {
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Support for ID-addressed context compaction updates. Omitted or 'null'
-	// means unsupported; '{}' advertises the complete compaction contract.
+	// means unsupported. '{}' advertises the complete compaction contract.
 	Compaction *CompactionCapabilities `json:"compaction,omitempty"`
 	// Config option capabilities supported by the client.
 	//
@@ -2160,16 +2160,13 @@ func (v *Content) UnmarshalJSON(b []byte) error {
 
 // Content blocks represent displayable information in the Agent Client Protocol.
 //
-// They provide a structured way to handle various types of user-facing content—whether
-// it's text from language models, images for analysis, or embedded resources for context.
-//
 // Content blocks appear in:
 // - User prompts sent via 'session/prompt'
 // - Language model output streamed through 'session/update' notifications
 // - Progress updates and results from tool calls
 //
-// This structure is compatible with the Model Context Protocol (MCP), enabling
-// agents to seamlessly forward content from MCP tool outputs without transformation.
+// This structure is compatible with the Model Context Protocol (MCP), so agents can
+// forward content from MCP tool outputs without transformation.
 //
 // See protocol docs: [Content](https://agentclientprotocol.com/protocol/v1/content)
 // Text content. May be plain text or formatted with Markdown.
@@ -2674,7 +2671,8 @@ type Cost struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Total cumulative cost for session.
 	Amount float64 `json:"amount"`
-	// ISO 4217 currency code (e.g., "USD", "EUR").
+	// Unit of 'amount': an ISO 4217 currency code (e.g., "USD", "EUR") for money, or another
+	// unit such as "credits".
 	Currency string `json:"currency"`
 }
 
@@ -5688,9 +5686,9 @@ type Implementation struct {
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Intended for programmatic or logical use, but can be used as a display
-	// name fallback if title isn’t present.
+	// name fallback if title isn't present.
 	Name string `json:"name"`
-	// Intended for UI and end-user contexts — optimized to be human-readable
+	// Intended for UI and end-user contexts and optimized to be human-readable
 	// and easily understood.
 	//
 	// If not provided, the name should be used for display.
@@ -9494,8 +9492,8 @@ type SessionDeleteCapabilities struct {
 
 // A unique identifier for a conversation session between a client and agent.
 //
-// Sessions maintain their own context, conversation history, and state,
-// allowing multiple independent interactions with the same agent.
+// Each session has its own context, conversation history, and state, so one
+// agent can run several independent sessions.
 //
 // See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/v1/session-setup#session-id)
 type SessionId string
@@ -9560,7 +9558,7 @@ func (v *SessionInfo) UnmarshalJSON(b []byte) error {
 // Update to session metadata. All fields are optional to support partial updates.
 //
 // Agents send this notification to update session information like title or custom metadata.
-// This allows clients to display dynamic session names and track session state changes.
+// Clients can use it to keep session titles and state current.
 type SessionInfoUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at

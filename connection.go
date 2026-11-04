@@ -52,7 +52,10 @@ type ConnectionOptions struct {
 	// an ordering watermark. It runs on the reader and must not block, panic, or
 	// call this connection. Requests, responses and $/cancel_request bypass it.
 	AcceptNotification func(method string) bool
-	Logger             *slog.Logger
+	// RejectBatch rejects each inbound JSON array as one invalid request before
+	// dispatching any entries. The default preserves JSON-RPC batch support.
+	RejectBatch bool
+	Logger      *slog.Logger
 }
 
 // DefaultConnectionOptions returns the production defaults used by
@@ -442,6 +445,10 @@ func (c *Connection) receive() {
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
+			continue
+		}
+		if c.opts.RejectBatch && line[0] == '[' && json.Valid(line) {
+			c.sendProtocolError(NewInvalidRequest(nil))
 			continue
 		}
 		if !c.dispatchFrame(ParseTransportFrame(line)) {

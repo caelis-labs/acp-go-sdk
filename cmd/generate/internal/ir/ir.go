@@ -28,6 +28,8 @@ const (
 	BindAgentSessionConfig
 	BindAgentSessionMode
 	BindAgentExperimental
+	BindAgentToolCallCancel
+	BindAgentTerminalCancel
 	// Client bindings
 	BindClient
 	BindClientFileReader
@@ -186,6 +188,10 @@ func classifyBinding(schema *load.Schema, mi *MethodInfo) MethodBinding {
 	switch mi.Side {
 	case "agent":
 		switch mi.Method {
+		case "tool_call/cancel":
+			return BindAgentToolCallCancel
+		case "terminal/cancel":
+			return BindAgentTerminalCancel
 		case "authenticate":
 			return BindAgentAuthenticator
 		case "logout":

@@ -3,7 +3,6 @@ package emit
 import (
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/ir"
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/load"
@@ -95,6 +94,9 @@ func emitDisplayRecoveryDecode(g *Group, schema *load.Schema, def *load.Definiti
 						)
 					})
 				})
+				if prop.MinItems > 0 {
+					h.If(Id("len").Call(Id("a").Dot(field)).Op("<").Lit(prop.MinItems)).Block(Return(Qual("fmt", "Errorf").Call(Lit(name+" requires at least %d valid items"), Lit(prop.MinItems))))
+				}
 			} else {
 				// Decode into a temporary: encoding/json may partially populate a
 				// value before returning an error, which must not leak into recovery.
@@ -134,7 +136,7 @@ func strictReceiverProperties(def *load.Definition) []string {
 // errors; null is empty, and null elements are never silently coerced.
 func receiverNullIsEmpty(def *load.Definition, name string) bool {
 	prop := def.Properties[name]
-	return prop != nil && (prop.DeserializeDefaultOnNull || (ir.PrimaryType(prop) == "array" && strings.Contains(prop.Description, "Omitted, `null`, and empty")))
+	return prop != nil && prop.DeserializeDefaultOnNull
 }
 
 func emitReceiverNullDefaults(g *Group, def *load.Definition) {
@@ -176,6 +178,12 @@ func emitReceiverPropertyChecks(g *Group, schema *load.Schema, def *load.Definit
 				)
 			})
 		}
+		if prop.MinItems > 0 {
+			g.If(List(Id("raw"), Id("ok")).Op(":=").Id("m").Index(Lit(name)), Id("ok")).Block(
+				Var().Id("items").Index().Qual("encoding/json", "RawMessage"),
+				If(Qual("encoding/json", "Unmarshal").Call(Id("raw"), Op("&").Id("items")).Op("!=").Nil().Op("||").Id("len").Call(Id("items")).Op("<").Lit(prop.MinItems)).Block(Return(Qual("fmt", "Errorf").Call(Lit(name+" requires at least %d items"), Lit(prop.MinItems)))),
+			)
+		}
 		if prop.MinLength <= 0 {
 			continue
 		}
@@ -195,7 +203,7 @@ func needsReceiverDecode(schema *load.Schema, def *load.Definition) bool {
 		return true
 	}
 	for _, prop := range def.Properties {
-		if (prop.Minimum != nil && *prop.Minimum > 0) || prop.MinLength > 0 || ir.PrimaryType(prop) == "null" {
+		if (prop.Minimum != nil && *prop.Minimum > 0) || prop.MinLength > 0 || prop.MinItems > 0 || ir.PrimaryType(prop) == "null" {
 			return true
 		}
 	}

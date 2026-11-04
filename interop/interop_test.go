@@ -161,18 +161,18 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "2.1.0" ||
-		locked.TypeScript.Tag != "v2.1.0" ||
-		locked.TypeScript.Commit != "dbbe157eec813ab64b5199d6660540e5da513f22" ||
-		locked.TypeScript.Integrity != "sha512-IuKjJmHLPzbmbg26eK9Jopd8AVxgLuu8fX114YzYAU6tLYclCo2DUzLL4vbCpYGr9mzvs2T0kigE3ZCueL06tg==" {
+		locked.TypeScript.Version != "2.4.0" ||
+		locked.TypeScript.Tag != "v2.4.0" ||
+		locked.TypeScript.Commit != "8d953276e54f8fd60108d6ffca3aefc4c83644a4" ||
+		locked.TypeScript.Integrity != "sha512-7qJ8nnyj7WesC5ve185ioTpB2/svQoeGV4HA4nLEhgDUrcmBe54/08VcXc/oL4p14tDbxxECZzdYmUYQ+4l+Wg==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "3.6.0" ||
-		locked.Rust.Tag != "v3.6.0" ||
-		locked.Rust.Commit != "a978f01e8cde58a7976666a713531d8c9342fb51" ||
-		locked.Rust.Checksum != "89b41f18aeb4a6d1a463b994cb880cc562cdea7d616ea3e22f9c6f2a438fc4f6" ||
+		locked.Rust.Version != "5.0.0" ||
+		locked.Rust.Tag != "v5.0.0" ||
+		locked.Rust.Commit != "1b1399ab4a281ea6fccbdc3722a64fe35c816399" ||
+		locked.Rust.Checksum != "80ce60ce096020c2d0aa10445bc27b8856109e288abaf564ab517031ae819d69" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}

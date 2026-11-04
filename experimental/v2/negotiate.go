@@ -32,7 +32,9 @@ func SelectProtocolVersion(requested ProtocolVersion) (ProtocolVersion, error) {
 
 // ProtocolRouter pins v1 or v2 on the first initialize request and then
 // forwards later methods to that implementation. It is experimental and does
-// not mix v1 and v2 types in the stable root package.
+// not mix v1 and v2 types in the stable root package. When using this router
+// with a raw acp.Connection, set ConnectionOptions.RejectBatch to reject
+// arrays before dispatch; v2 does not support JSON-RPC batching.
 type ProtocolRouter struct {
 	V1 acp.MethodHandler
 	V2 acp.MethodHandler
