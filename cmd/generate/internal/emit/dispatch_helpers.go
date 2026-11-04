@@ -42,6 +42,10 @@ func jRequireInboundKind(kind string) Code {
 // jAgentAssert returns prelude for interface assertions and the receiver name.
 func jAgentAssert(binding ir.MethodBinding, methodName, paramType, respType string, hasResponse bool) ([]Code, string) {
 	switch binding {
+	case ir.BindAgentToolCallCancel:
+		return jNamedAssert(Id("a").Dot("agent"), "canceller", "AgentToolCallCancel")
+	case ir.BindAgentTerminalCancel:
+		return jNamedAssert(Id("a").Dot("agent"), "canceller", "AgentTerminalCancel")
 	case ir.BindAgentAuthenticator:
 		return jNamedAssert(Id("a").Dot("agent"), "authenticator", "AgentAuthenticator")
 	case ir.BindAgentLogout:

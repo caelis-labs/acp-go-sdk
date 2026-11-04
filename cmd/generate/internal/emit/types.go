@@ -685,6 +685,8 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 	agentSessionConfigMethods := []Code{}
 	agentSessionModeMethods := []Code{}
 	agentExperimentalMethods := []Code{}
+	agentToolCallCancelMethods := []Code{}
+	agentTerminalCancelMethods := []Code{}
 	for _, k := range ir.SortedKeys(meta.AgentMethods) {
 		wire := meta.AgentMethods[k]
 		mi := groups["agent|"+wire]
@@ -693,6 +695,10 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 		}
 		target := &agentMethods
 		switch mi.Binding {
+		case ir.BindAgentToolCallCancel:
+			target = &agentToolCallCancelMethods
+		case ir.BindAgentTerminalCancel:
+			target = &agentTerminalCancelMethods
 		case ir.BindAgentAuthenticator:
 			target = &agentAuthenticatorMethods
 		case ir.BindAgentLogout:
@@ -732,6 +738,14 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 		}
 	}
 	f.Type().Id("Agent").Interface(agentMethods...)
+	if len(agentToolCallCancelMethods) > 0 {
+		f.Comment("AgentToolCallCancel defines optional per-tool-call cancellation.")
+		f.Type().Id("AgentToolCallCancel").Interface(agentToolCallCancelMethods...)
+	}
+	if len(agentTerminalCancelMethods) > 0 {
+		f.Comment("AgentTerminalCancel defines optional per-terminal cancellation.")
+		f.Type().Id("AgentTerminalCancel").Interface(agentTerminalCancelMethods...)
+	}
 	if len(agentAuthenticatorMethods) > 0 {
 		f.Comment("AgentAuthenticator defines optional authentication support. Implement it only when Initialize advertises authentication methods.")
 		f.Type().Id("AgentAuthenticator").Interface(agentAuthenticatorMethods...)
@@ -963,6 +977,9 @@ func emitValidateJen(f *File, name string, schema *load.Schema, def *load.Defini
 				allowsNull := definitionAllowsNull(schema, property, make(map[*load.Definition]bool))
 				switch ir.PrimaryType(property) {
 				case "array":
+					if property.MinItems > 0 {
+						g.If(Id("len").Call(Id("v").Dot(field)).Op("<").Lit(property.MinItems)).Block(Return(Qual("fmt", "Errorf").Call(Lit(propName+" requires at least %d items"), Lit(property.MinItems))))
+					}
 					if !allowsNull && !receiverNullIsEmpty(def, propName) {
 						g.If(Id("v").Dot(field).Op("==").Nil()).Block(
 							Return(Qual("fmt", "Errorf").Call(Lit(propName + " is required"))),
@@ -1371,16 +1388,20 @@ func jenTypeForOptional(d *load.Definition) Code {
 // _meta into map[string]any would coerce JSON numbers to float64 and corrupt
 // valid values that cannot be represented exactly by IEEE-754 doubles.
 func jenTypeForProperty(name string, d *load.Definition) Code {
-	// Alpha.10 inlines the same non-null request-ID union in RPC envelopes.
+	// V2 RPC envelopes inline integer/string IDs; error IDs also allow null.
 	// Keep its integer/string representation instead of decoding through any
 	// (float64) or mistaking two non-null branches for a nullable string.
-	if name == "id" && d != nil && len(d.AnyOf) == 2 {
-		integer, text := false, false
+	if name == "id" && d != nil && (len(d.AnyOf) == 2 || len(d.AnyOf) == 3) {
+		integer, text, nullable := false, false, false
 		for _, branch := range d.AnyOf {
+			nullable = nullable || ir.PrimaryType(branch) == "null"
 			integer = integer || (ir.PrimaryType(branch) == "integer" && branch.Format == "int64")
 			text = text || ir.PrimaryType(branch) == "string"
 		}
 		if integer && text {
+			if nullable {
+				return Op("*").Id("RequestId")
+			}
 			return Id("RequestId")
 		}
 	}
@@ -1660,7 +1681,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			fieldName = util.ToExportedField(tname)
 		}
 		isObj := len(v.Properties) > 0
-		preserveRaw := preservesRawPayload(v)
+		preserveRaw := preservesRawPayload(v) || (schema.Version == 2 && unconstrainedValue(v))
 		isArray := ir.PrimaryType(v) == "array"
 		requiredAnyOf := unionRequiredAlternatives(schema, v)
 		alternativeProps := unionAlternativeProperties(schema, v)
@@ -1792,6 +1813,9 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					// Non-object title-only variants can still carry payloads (e.g. arrays).
 					// Emit a concrete type so sequential decode can succeed for valid payloads.
 					f.Type().Id(tname).Add(jenTypeFor(v))
+					if v.MinItems > 0 {
+						emitArrayMinimumDecode(f, tname, v.MinItems)
+					}
 				} else {
 					// Emit as empty struct only for truly empty variants.
 					f.Type().Id(tname).Struct(st...)
@@ -1821,7 +1845,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			} else {
 				definition := *v
 				definition.Properties = variantProperties
-				if needsReceiverDecode(schema, &definition) {
+				if needsReceiverDecode(schema, &definition) || (schema.Version == 2 && len(definition.Required) > 0) {
 					emitRequiredObjectUnmarshal(f, tname, schema, &definition)
 				}
 			}
@@ -2004,6 +2028,11 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			If(List(Id("_"), Id("ok")).Op(":=").Id("err").Assert(Op("*").Qual("encoding/json", "UnmarshalTypeError")), Op("!").Id("ok")).Block(Return(Id("err"))),
 		)
 		if schema.Version == 2 {
+			for _, vi := range variants {
+				if vi.preserveRaw && !vi.isObject {
+					g.If(Qual("bytes", "Equal").Call(Qual("bytes", "TrimSpace").Call(Id("b")), Index().Byte().Parens(Lit("null")))).Block(Var().Id("v").Id(vi.typeName).Op("=").Append(Index().Byte().Parens(Nil()), Id("b").Op("...")), Id("u").Dot(vi.fieldName).Op("=").Op("&").Id("v"), Return(Nil()))
+				}
+			}
 			g.If(Qual("bytes", "Equal").Call(Qual("bytes", "TrimSpace").Call(Id("b")), Index().Byte().Parens(Lit("null")))).Block(Return(Qual("errors", "New").Call(Lit("no matching null variant"))))
 		}
 		// For array variants with required keys on object items, try key-based matching first.
@@ -2185,4 +2214,19 @@ func emitClosedStringDecode(f *File, name string, values []any) {
 		})
 		g.Return(Qual("errors", "New").Call(Lit("invalid enum value")))
 	})
+}
+
+// unconstrainedValue matches the schema's arbitrary JSON fallback, including null.
+func unconstrainedValue(d *load.Definition) bool {
+	return d.Type == nil && d.Ref == "" && len(d.Properties) == 0 && len(d.AllOf) == 0 && len(d.AnyOf) == 0 && len(d.OneOf) == 0 && len(d.Enum) == 0 && d.Const == nil
+}
+
+func emitArrayMinimumDecode(f *File, name string, minimum int) {
+	f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().Block(
+		Op("*").Id("v").Op("=").Nil(),
+		Type().Id("Alias").Id(name), Var().Id("a").Id("Alias"),
+		If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err"))),
+		If(Id("len").Call(Id("a")).Op("<").Lit(minimum)).Block(Return(Qual("fmt", "Errorf").Call(Lit(name+" requires at least %d items"), Lit(minimum)))),
+		Op("*").Id("v").Op("=").Id(name).Call(Id("a")), Return(Nil()),
+	)
 }

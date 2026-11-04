@@ -12,6 +12,9 @@ import (
 )
 
 // An absolute filesystem path used by the protocol.
+//
+// Uses the native syntax of the machine the Agent runs on, such as '/home/user/project',
+// 'C:\Users\user\project', or '\\server\share\project'. It is not a URI.
 type AbsolutePath string
 
 // Authentication-related extension capabilities supported by the agent.
@@ -22,7 +25,7 @@ type AbsolutePath string
 type AgentAuthCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -63,7 +66,7 @@ func (v *AgentAuthCapabilities) UnmarshalJSON(b []byte) error {
 type AgentCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -71,13 +74,13 @@ type AgentCapabilities struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean the agent does not advertise any
 	// authentication-related extensions. This field does not advertise support
-	// for 'auth/login' or 'auth/logout'; those methods are advertised by a
+	// for 'auth/login' or 'auth/logout'. Those methods are advertised by a
 	// non-empty 'authMethods' list in the 'initialize' response.
 	Auth *AgentAuthCapabilities `json:"auth,omitempty"`
 	// Session capabilities supported by the agent.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean the agent does not support the
-	// 'session/*' method surface. Supplying '{}' means the agent supports the
+	// 'session/*' methods. Supplying '{}' means the agent supports the
 	// baseline session methods: 'session/new', 'session/list',
 	// 'session/resume', 'session/close', 'session/prompt', 'session/cancel',
 	// and 'session/update'.
@@ -129,8 +132,8 @@ func (v *AgentCapabilities) UnmarshalJSON(b []byte) error {
 // Only 'messageId' is required. 'content' has patch semantics:
 // an omitted field leaves existing message content unchanged, 'null' clears the
 // value, and a concrete array replaces the previous value. For a new
-// 'messageId', omitted fields use client defaults. 'content' is replaced as a
-// whole array; send '[]' or 'null' to clear it.
+// 'messageId', omitted 'content' starts empty. 'content' is replaced as a
+// whole array. Send '[]' or 'null' to clear it.
 //
 // Message updates and chunks are applied in the order they are received. When
 // an 'agent_message' update includes 'content', that array replaces any
@@ -139,11 +142,11 @@ func (v *AgentCapabilities) UnmarshalJSON(b []byte) error {
 // content.
 type AgentMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -391,6 +394,39 @@ type AgentResult struct {
 	Result any `json:"result"`
 }
 
+func (v *AgentResult) UnmarshalJSON(b []byte) error {
+	*v = AgentResult{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["id"]
+		if !ok {
+			return fmt.Errorf("id is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("id must not be null")
+		}
+	}
+	{
+		raw, ok := m["result"]
+		if !ok {
+			return fmt.Errorf("result is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("result must not be null")
+		}
+	}
+	type Alias AgentResult
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = AgentResult(a)
+	return nil
+}
+
 // A failed JSON-RPC response.
 type AgentError struct {
 	// Method-specific error data.
@@ -399,7 +435,37 @@ type AgentError struct {
 	//
 	// Required. 'null' only when the request's id could not be determined, such as
 	// for a parse error or an invalid request.
-	Id RequestId `json:"id"`
+	Id *RequestId `json:"id"`
+}
+
+func (v *AgentError) UnmarshalJSON(b []byte) error {
+	*v = AgentError{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["error"]
+		if !ok {
+			return fmt.Errorf("error is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("error must not be null")
+		}
+	}
+	{
+		_, ok := m["id"]
+		if !ok {
+			return fmt.Errorf("id is required")
+		}
+	}
+	type Alias AgentError
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = AgentError(a)
+	return nil
 }
 
 type AgentResponse struct {
@@ -475,9 +541,6 @@ func (u *AgentResponse) UnmarshalJSON(b []byte) error {
 			{
 				raw, ok := m["id"]
 				if !ok {
-					match = false
-				}
-				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 					match = false
 				}
 				if ok {
@@ -561,8 +624,8 @@ func (u *AgentResponse) Validate() error {
 // Only 'messageId' is required. 'content' has patch semantics:
 // an omitted field leaves existing thought content unchanged, 'null' clears the
 // value, and a concrete array replaces the previous value. For a new
-// 'messageId', omitted fields use client defaults. 'content' is replaced as a
-// whole array; send '[]' or 'null' to clear it.
+// 'messageId', omitted 'content' starts empty. 'content' is replaced as a
+// whole array. Send '[]' or 'null' to clear it.
 //
 // Message updates and chunks are applied in the order they are received. When
 // an 'agent_thought' update includes 'content', that array replaces any
@@ -571,11 +634,11 @@ func (u *AgentResponse) Validate() error {
 // content.
 type AgentThought struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -732,7 +795,7 @@ func (v *AgentThought) UnsetContent() {
 type Annotations struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -742,11 +805,12 @@ type Annotations struct {
 	Audience []Role `json:"audience,omitempty"`
 	// Timestamp indicating when the underlying resource was last modified.
 	//
-	// Must be an RFC 3339 formatted string (e.g., "2025-01-12T15:00:58Z").
+	// Should be an ISO 8601 formatted string (e.g., "2025-01-12T15:00:58Z"), as in MCP.
 	//
 	// Omitted and 'null' are equivalent and mean the modification time is not reported.
 	LastModified *string `json:"lastModified,omitempty"`
-	// Relative importance of this content when clients choose what to surface.
+	// Relative importance of this content when clients choose what to surface, from 0 (least
+	// important) to 1 (most important).
 	//
 	// Omitted and 'null' are equivalent and mean no priority is specified.
 	Priority *float64 `json:"priority,omitempty"`
@@ -809,7 +873,7 @@ func (v *Annotations) UnmarshalJSON(b []byte) error {
 type AudioContent struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -882,13 +946,13 @@ func (v *AudioContent) UnmarshalJSON(b []byte) error {
 type AuthMethodTerminalInline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Additional arguments to append to the configured agent invocation for terminal auth.
 	Args []string `json:"args,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -969,11 +1033,11 @@ func (v *AuthMethodTerminalInline) UnmarshalJSON(b []byte) error {
 type AuthMethodAgentInline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -1314,11 +1378,11 @@ func (u *AuthMethod) Validate() error {
 type AuthMethodAgent struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -1387,18 +1451,18 @@ type AuthMethodId string
 // The client runs the configured agent program as a separate interactive
 // process for the user to authenticate via a TUI. Agents MUST advertise this
 // method only when the client enabled its terminal authentication capability.
-// A zero exit status signals success; any other termination signals failure.
+// A zero exit status signals success. Any other termination signals failure.
 // The client MUST NOT pass this method to 'auth/login'.
 type AuthMethodTerminal struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Additional arguments to append to the configured agent invocation for terminal auth.
 	Args []string `json:"args,omitempty"`
-	// Optional description providing more details about this authentication method.
+	// Optional human-readable description of this authentication method.
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -1470,7 +1534,7 @@ func (v *AuthMethodTerminal) UnmarshalJSON(b []byte) error {
 type AvailableCommandCommand struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -1480,7 +1544,9 @@ type AvailableCommandCommand struct {
 	//
 	// Omitted and 'null' are equivalent and mean the command takes no input.
 	Input *AvailableCommandInput `json:"input,omitempty"`
-	// Command name (e.g., 'create_plan', 'research_codebase').
+	// Command name without the leading '/' (e.g., 'create_plan', 'research_codebase').
+	//
+	// MUST NOT contain whitespace and MUST be unique within the command list.
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
@@ -1746,11 +1812,11 @@ func (u *AvailableCommand) Validate() error {
 }
 
 // The input specification for a command.
-// All text that was typed after the command name is provided as input.
+// All text after the command name and the whitespace following it is provided as input.
 type AvailableCommandInputText struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -1816,7 +1882,7 @@ func (v *AvailableCommandInputText) UnmarshalJSON(b []byte) error {
 type AvailableCommandInputOther = json.RawMessage
 
 type AvailableCommandInput struct {
-	// All text that was typed after the command name is provided as input.
+	// All text after the command name and the whitespace following it is provided as input.
 	Text *AvailableCommandInputText `json:"-"`
 	// Custom or future command input specification.
 	//
@@ -1964,7 +2030,7 @@ func (u *AvailableCommandInput) Validate() error {
 type AvailableCommandsUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2026,11 +2092,436 @@ func (v *AvailableCommandsUpdate) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// A listed terminal running in the background.
+type BackgroundTerminal struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The ID of the listed terminal.
+	TerminalId TerminalId `json:"terminalId"`
+}
+
+func (v *BackgroundTerminal) UnmarshalJSON(b []byte) error {
+	*v = BackgroundTerminal{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["terminalId"]
+		if !ok {
+			return fmt.Errorf("terminalId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("terminalId must not be null")
+		}
+	}
+	type Alias BackgroundTerminal
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = BackgroundTerminal(a)
+	return nil
+}
+
+// A listed tool call whose work continues in the background.
+type BackgroundToolCall struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The ID of the listed tool call.
+	ToolCallId ToolCallId `json:"toolCallId"`
+}
+
+func (v *BackgroundToolCall) UnmarshalJSON(b []byte) error {
+	*v = BackgroundToolCall{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["toolCallId"]
+		if !ok {
+			return fmt.Errorf("toolCallId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("toolCallId must not be null")
+		}
+	}
+	type Alias BackgroundToolCall
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = BackgroundToolCall(a)
+	return nil
+}
+
+// One piece of work running independently of the session's foreground work.
+//
+// Items reference entities the Client already tracks. The Agent MUST announce each item
+// before the first snapshot that lists it, and MUST report a terminal's 'exitStatus' or a
+// tool call's final status before the snapshot that removes it. Each piece of work is
+// listed once: process-backed work is listed as its terminal, not also as its tool call.
+//
+// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+// A process that keeps running after its tool call returned control to the model.
+// Live until its 'terminal_update' reports 'exitStatus'.
+type BackgroundWorkTerminal struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The ID of the listed terminal.
+	TerminalId TerminalId `json:"terminalId"`
+	Type       string     `json:"type"`
+}
+
+func (v *BackgroundWorkTerminal) UnmarshalJSON(b []byte) error {
+	*v = BackgroundWorkTerminal{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["terminalId"]
+		if !ok {
+			return fmt.Errorf("terminalId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("terminalId must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	type Alias BackgroundWorkTerminal
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = BackgroundWorkTerminal(a)
+	return nil
+}
+
+// Work started by a tool call that continues without a process of its own, such as
+// a watcher, a workflow, or a scheduled wakeup. 'pending' and 'paused' tool calls
+// stay listed.
+type BackgroundWorkToolCall struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The ID of the listed tool call.
+	ToolCallId ToolCallId `json:"toolCallId"`
+	Type       string     `json:"type"`
+}
+
+func (v *BackgroundWorkToolCall) UnmarshalJSON(b []byte) error {
+	*v = BackgroundWorkToolCall{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["toolCallId"]
+		if !ok {
+			return fmt.Errorf("toolCallId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("toolCallId must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
+	}
+	type Alias BackgroundWorkToolCall
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = BackgroundWorkToolCall(a)
+	return nil
+}
+
+// Custom or future background work.
+//
+// Values beginning with '_' are reserved for implementation-specific
+// extensions. Unknown values that do not begin with '_' are reserved for
+// future ACP variants.
+//
+// An unknown item still means background work is running, even when the Client
+// cannot show what it is.
+type BackgroundWorkOther = json.RawMessage
+
+type BackgroundWork struct {
+	// A process that keeps running after its tool call returned control to the model.
+	// Live until its 'terminal_update' reports 'exitStatus'.
+	Terminal *BackgroundWorkTerminal `json:"-"`
+	// Work started by a tool call that continues without a process of its own, such as
+	// a watcher, a workflow, or a scheduled wakeup. 'pending' and 'paused' tool calls
+	// stay listed.
+	ToolCall *BackgroundWorkToolCall `json:"-"`
+	// Custom or future background work.
+	//
+	// Values beginning with '_' are reserved for implementation-specific
+	// extensions. Unknown values that do not begin with '_' are reserved for
+	// future ACP variants.
+	//
+	// An unknown item still means background work is running, even when the Client
+	// cannot show what it is.
+	Other *BackgroundWorkOther `json:"-"`
+}
+
+func (u *BackgroundWork) UnmarshalJSON(b []byte) error {
+	*u = BackgroundWork{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err == nil {
+		{
+			var disc string
+			if v, ok := m["type"]; ok {
+				json.Unmarshal(v, &disc)
+			}
+			switch disc {
+			case "terminal":
+				{
+					raw, ok := m["terminalId"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value TerminalId
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["type"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v BackgroundWorkTerminal
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Terminal = &v
+				return nil
+			case "tool_call":
+				{
+					raw, ok := m["toolCallId"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value ToolCallId
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				{
+					raw, ok := m["type"]
+					if !ok {
+						return errors.New("invalid variant payload")
+					}
+					if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+						return errors.New("invalid variant payload")
+					}
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						return errors.New("invalid variant payload")
+					}
+				}
+				var v BackgroundWorkToolCall
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.ToolCall = &v
+				return nil
+			}
+		}
+		{
+			var v BackgroundWorkOther
+			var match bool = true
+			{
+				raw, ok := m["type"]
+				if !ok {
+					match = false
+				}
+				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					match = false
+				}
+				if ok {
+					var value string
+					if json.Unmarshal(raw, &value) != nil {
+						match = false
+					}
+				}
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.Other = &v
+				return nil
+			}
+		}
+	} else {
+		if _, ok := err.(*json.UnmarshalTypeError); !ok {
+			return err
+		}
+	}
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		return errors.New("no matching null variant")
+	}
+	var arr []map[string]json.RawMessage
+	if json.Unmarshal(b, &arr) == nil {
+	}
+	return errors.New("no matching variant for union")
+}
+func (u BackgroundWork) MarshalJSON() ([]byte, error) {
+	if u.Terminal != nil {
+		_b, _e := json.Marshal(*u.Terminal)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["type"] = json.RawMessage("\"terminal\"")
+		return json.Marshal(m)
+	}
+	if u.ToolCall != nil {
+		_b, _e := json.Marshal(*u.ToolCall)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		m["type"] = json.RawMessage("\"tool_call\"")
+		return json.Marshal(m)
+	}
+	if u.Other != nil {
+		_b, _e := json.Marshal(*u.Other)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		return _b, nil
+	}
+	return []byte{}, nil
+}
+
+func (u *BackgroundWork) Validate() error {
+	var count int
+	if u.Terminal != nil {
+		count++
+	}
+	if u.ToolCall != nil {
+		count++
+	}
+	if u.Other != nil {
+		count++
+	}
+	if count < 1 {
+		return errors.New("BackgroundWork must have at least one variant set")
+	}
+	encoded, err := json.Marshal(*u)
+	if err != nil {
+		return err
+	}
+	var decoded BackgroundWork
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return fmt.Errorf("BackgroundWork: %w", err)
+	}
+	return nil
+}
+
 // Binary resource contents.
 type BlobResourceContents struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2099,7 +2590,7 @@ func (v *BlobResourceContents) UnmarshalJSON(b []byte) error {
 type BooleanPropertySchema struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2170,11 +2661,12 @@ func (v *BooleanPropertySchema) UnmarshalJSON(b []byte) error {
 type CancelRequestNotification struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// The ID of the request to cancel.
+	// The ID of the request to cancel: a request that the sender of this notification issued.
+	// Receivers match it only against requests they received from that sender.
 	RequestId RequestId `json:"requestId"`
 }
 
@@ -2226,7 +2718,7 @@ func (v *CancelRequestNotification) Validate() error {
 type CancelSessionNotification struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2273,11 +2765,238 @@ func (v *CancelSessionNotification) Validate() error {
 	return nil
 }
 
-// The session's work was cancelled before the user responded.
+// Request parameters for cancelling one terminal.
+//
+// Clients MUST NOT send it unless the terminal currently advertises 'capabilities.cancel'.
+//
+// The Agent responds once it has accepted the cancellation. The response does not mean
+// the work has stopped. The Agent confirms it with a 'terminal_update' that sets
+// 'exitStatus'. Cancelling stops the process but does not release the terminal, and does
+// not change the status of a tool call that references it.
+//
+// The Agent responds with '-32602' if the terminal is unknown, has already exited, or is not
+// cancellable. Cancelling a terminal does not change the foreground state by itself.
+//
+// See protocol docs: [Cancelling Terminals](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-terminals)
+type CancelTerminalRequest struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The ID of the session that owns the terminal.
+	SessionId SessionId `json:"sessionId"`
+	// The ID of the terminal to cancel.
+	TerminalId TerminalId `json:"terminalId"`
+}
+
+func (v *CancelTerminalRequest) UnmarshalJSON(b []byte) error {
+	*v = CancelTerminalRequest{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionId"]
+		if !ok {
+			return fmt.Errorf("sessionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["terminalId"]
+		if !ok {
+			return fmt.Errorf("terminalId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("terminalId must not be null")
+		}
+	}
+	type Alias CancelTerminalRequest
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = CancelTerminalRequest(a)
+	return nil
+}
+
+func (v *CancelTerminalRequest) Validate() error {
+	return nil
+}
+
+// Response from cancelling a terminal.
+type CancelTerminalResponse struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+func (v *CancelTerminalResponse) UnmarshalJSON(b []byte) error {
+	*v = CancelTerminalResponse{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias CancelTerminalResponse
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = CancelTerminalResponse(a)
+	return nil
+}
+
+func (v *CancelTerminalResponse) Validate() error {
+	return nil
+}
+
+// Request parameters for cancelling one tool call.
+//
+// Clients MUST NOT send it unless the tool call currently advertises 'capabilities.cancel'.
+//
+// The Agent responds once it has accepted the cancellation. The response does not mean
+// the work has stopped. The Agent confirms it with a 'tool_call_update' to a final
+// status: normally 'cancelled', or 'completed' or 'failed' if the work finished first.
+//
+// The Agent responds with '-32602' if the tool call is unknown, already final, or not
+// cancellable. Cancelling a tool call does not change the foreground state by itself.
+//
+// See protocol docs: [Cancelling Tool Calls](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-tool-calls)
+type CancelToolCallRequest struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The ID of the session that owns the tool call.
+	SessionId SessionId `json:"sessionId"`
+	// The ID of the tool call to cancel.
+	ToolCallId ToolCallId `json:"toolCallId"`
+}
+
+func (v *CancelToolCallRequest) UnmarshalJSON(b []byte) error {
+	*v = CancelToolCallRequest{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionId"]
+		if !ok {
+			return fmt.Errorf("sessionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionId must not be null")
+		}
+	}
+	{
+		raw, ok := m["toolCallId"]
+		if !ok {
+			return fmt.Errorf("toolCallId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("toolCallId must not be null")
+		}
+	}
+	type Alias CancelToolCallRequest
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = CancelToolCallRequest(a)
+	return nil
+}
+
+func (v *CancelToolCallRequest) Validate() error {
+	return nil
+}
+
+// Response from cancelling a tool call.
+type CancelToolCallResponse struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+func (v *CancelToolCallResponse) UnmarshalJSON(b []byte) error {
+	*v = CancelToolCallResponse{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias CancelToolCallResponse
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = CancelToolCallResponse(a)
+	return nil
+}
+
+func (v *CancelToolCallResponse) Validate() error {
+	return nil
+}
+
+// The request was not approved and no option was selected.
 type CancelledPermissionOutcome struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2317,7 +3036,7 @@ func (v *CancelledPermissionOutcome) UnmarshalJSON(b []byte) error {
 type ClientAuthCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2372,7 +3091,7 @@ func (v *ClientAuthCapabilities) UnmarshalJSON(b []byte) error {
 type ClientCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2526,6 +3245,39 @@ type ClientResult struct {
 	Result any `json:"result"`
 }
 
+func (v *ClientResult) UnmarshalJSON(b []byte) error {
+	*v = ClientResult{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["id"]
+		if !ok {
+			return fmt.Errorf("id is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("id must not be null")
+		}
+	}
+	{
+		raw, ok := m["result"]
+		if !ok {
+			return fmt.Errorf("result is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("result must not be null")
+		}
+	}
+	type Alias ClientResult
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = ClientResult(a)
+	return nil
+}
+
 // A failed JSON-RPC response.
 type ClientError struct {
 	// Method-specific error data.
@@ -2534,7 +3286,37 @@ type ClientError struct {
 	//
 	// Required. 'null' only when the request's id could not be determined, such as
 	// for a parse error or an invalid request.
-	Id RequestId `json:"id"`
+	Id *RequestId `json:"id"`
+}
+
+func (v *ClientError) UnmarshalJSON(b []byte) error {
+	*v = ClientError{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["error"]
+		if !ok {
+			return fmt.Errorf("error is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("error must not be null")
+		}
+	}
+	{
+		_, ok := m["id"]
+		if !ok {
+			return fmt.Errorf("id is required")
+		}
+	}
+	type Alias ClientError
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = ClientError(a)
+	return nil
 }
 
 type ClientResponse struct {
@@ -2610,9 +3392,6 @@ func (u *ClientResponse) UnmarshalJSON(b []byte) error {
 			{
 				raw, ok := m["id"]
 				if !ok {
-					match = false
-				}
-				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 					match = false
 				}
 				if ok {
@@ -2693,24 +3472,28 @@ func (u *ClientResponse) Validate() error {
 
 // Request parameters for closing an active session.
 //
-// The agent **must** cancel any ongoing work related to the session (treat it
-// as if 'session/cancel' was called) and then free up any resources associated
-// with the session.
+// The Agent MUST cancel any ongoing work related to the session as if 'session/cancel'
+// was called, then free the resources associated with the session. Unlike 'session/cancel',
+// closing also stops the session's background work. After the close response, the Agent
+// sends no other messages for the session on that connection.
+//
+// Closing a session that does not exist or is not active SHOULD succeed, and Clients SHOULD
+// treat a '-32002' response as a successful close.
 //
 // When closing cancels active foreground work, the Agent MUST send the final
 // updates for that work and the idle 'state_update' with 'stopReason: "cancelled"'
 // before responding successfully to 'session/close'. Closing an idle session
 // does not itself require another idle update.
 //
-// Closing may also cancel pending 'session/prompt' requests, including queued
-// prompts. If closing prevents a prompt's user message from being inserted, the
+// Closing also cancels pending 'session/prompt' requests whose messages have not
+// been inserted, including held prompts. If closing prevents a prompt's user message from being inserted, the
 // Agent MUST answer that request with '-32800' (Request Cancelled). If the message
 // has already been inserted, the Agent MUST respond successfully with its
 // 'messageId'. Prompt responses need not precede the close response.
 type CloseSessionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2761,7 +3544,7 @@ func (v *CloseSessionRequest) Validate() error {
 type CloseSessionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2803,7 +3586,7 @@ func (v *CloseSessionResponse) Validate() error {
 type Command struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2813,7 +3596,9 @@ type Command struct {
 	//
 	// Omitted and 'null' are equivalent and mean the command takes no input.
 	Input *AvailableCommandInput `json:"input,omitempty"`
-	// Command name (e.g., 'create_plan', 'research_codebase').
+	// Command name without the leading '/' (e.g., 'create_plan', 'research_codebase').
+	//
+	// MUST NOT contain whitespace and MUST be unique within the command list.
 	Name string `json:"name"`
 }
 
@@ -2872,7 +3657,7 @@ func (v *Command) UnmarshalJSON(b []byte) error {
 type CommandPermissionSubject struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -2962,7 +3747,7 @@ const (
 type CompactionSummaryChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -3026,11 +3811,11 @@ func (v *CompactionSummaryChunk) UnmarshalJSON(b []byte) error {
 // stored metadata by top-level key instead of replacing it.
 type CompactionUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3251,7 +4036,7 @@ func (v *CompactionUpdate) UnsetSummary() {
 type CompleteElicitationNotification struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3302,7 +4087,7 @@ func (v *CompleteElicitationNotification) Validate() error {
 type ConfigOptionUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3368,7 +4153,7 @@ func (v *ConfigOptionUpdate) UnmarshalJSON(b []byte) error {
 type Content struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3413,17 +4198,14 @@ func (v *Content) UnmarshalJSON(b []byte) error {
 
 // Content blocks represent displayable information in the Agent Client Protocol.
 //
-// They provide a structured way to handle various types of user-facing content—whether
-// it's text from language models, images for analysis, or embedded resources for context.
-//
 // Content blocks appear in:
 // - User prompts sent via 'session/prompt'
 // - Language model output reported through 'session/update' notifications as
 // message updates or streamed chunks
 // - Progress updates and results from tool calls
 //
-// This structure is compatible with the Model Context Protocol (MCP), enabling
-// agents to seamlessly forward content from MCP tool outputs without transformation.
+// This structure is compatible with the Model Context Protocol (MCP), so agents can
+// forward content from MCP tool outputs without transformation.
 //
 // See protocol docs: [Content](https://agentclientprotocol.com/protocol/v2/content)
 // Text content. May be plain text or formatted with Markdown.
@@ -3434,7 +4216,7 @@ func (v *Content) UnmarshalJSON(b []byte) error {
 type ContentBlockText struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3504,7 +4286,7 @@ func (v *ContentBlockText) UnmarshalJSON(b []byte) error {
 type ContentBlockImage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3596,7 +4378,7 @@ func (v *ContentBlockImage) UnmarshalJSON(b []byte) error {
 type ContentBlockAudio struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3671,13 +4453,13 @@ func (v *ContentBlockAudio) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// References to resources that the agent can access.
+// References to resources that the receiver may be able to read.
 //
 // All agents MUST support resource links in prompts.
 type ContentBlockResourceLink struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3821,7 +4603,7 @@ func (v *ContentBlockResourceLink) UnmarshalJSON(b []byte) error {
 type ContentBlockResource struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -3913,7 +4695,7 @@ type ContentBlock struct {
 	//
 	// Requires the 'audio' prompt capability when included in prompts.
 	Audio *ContentBlockAudio `json:"-"`
-	// References to resources that the agent can access.
+	// References to resources that the receiver may be able to read.
 	//
 	// All agents MUST support resource links in prompts.
 	ResourceLink *ContentBlockResourceLink `json:"-"`
@@ -4301,7 +5083,7 @@ func (u *ContentBlock) Validate() error {
 type ContentChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -4363,13 +5145,14 @@ func (v *ContentChunk) UnmarshalJSON(b []byte) error {
 type Cost struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Total cumulative cost for session.
 	Amount float64 `json:"amount"`
-	// ISO 4217 currency code (e.g., "USD", "EUR").
+	// Unit of 'amount': an ISO 4217 currency code (e.g., "USD", "EUR") for money, or another
+	// unit such as "credits".
 	Currency string `json:"currency"`
 }
 
@@ -4438,7 +5221,7 @@ func (v *Cost) UnmarshalJSON(b []byte) error {
 type CreateElicitationForm struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -4513,7 +5296,7 @@ func (v *CreateElicitationForm) UnmarshalJSON(b []byte) error {
 type CreateElicitationUrl struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -4997,7 +5780,7 @@ func (u *CreateElicitationRequest) Validate() error {
 type CreateElicitationAccept struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta   map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5047,7 +5830,7 @@ func (v *CreateElicitationAccept) UnmarshalJSON(b []byte) error {
 type CreateElicitationDecline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta   map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5093,7 +5876,7 @@ func (v *CreateElicitationDecline) UnmarshalJSON(b []byte) error {
 type CreateElicitationCancel struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta   map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5357,7 +6140,7 @@ func (u *CreateElicitationResponse) Validate() error {
 type DeleteSessionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5408,7 +6191,7 @@ func (v *DeleteSessionRequest) Validate() error {
 type DeleteSessionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5455,7 +6238,7 @@ func (v *DeleteSessionResponse) Validate() error {
 type Diff struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5539,7 +6322,7 @@ func (v *Diff) UnmarshalJSON(b []byte) error {
 type DiffChangeAdd struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5618,7 +6401,7 @@ func (v *DiffChangeAdd) UnmarshalJSON(b []byte) error {
 type DiffChangeDelete struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5697,7 +6480,7 @@ func (v *DiffChangeDelete) UnmarshalJSON(b []byte) error {
 type DiffChangeModify struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5776,7 +6559,7 @@ func (v *DiffChangeModify) UnmarshalJSON(b []byte) error {
 type DiffChangeMove struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -5866,7 +6649,7 @@ func (v *DiffChangeMove) UnmarshalJSON(b []byte) error {
 type DiffChangeCopy struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -6339,7 +7122,7 @@ const (
 type DiffPatch struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -6483,7 +7266,7 @@ type ElicitationAcceptAction struct {
 type ElicitationCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -6555,6 +7338,12 @@ type ElicitationContentValueBoolean bool
 // String array value accepted in elicitation response content.
 type ElicitationContentValueStringArray []string
 
+// Any other JSON value, such as the value of a custom or future property type.
+//
+// Preserved as sent. Agents validate it against the requested schema like any
+// other value.
+type ElicitationContentValueOther = json.RawMessage
+
 type ElicitationContentValue struct {
 	// String value accepted in elicitation response content.
 	String *ElicitationContentValueString `json:"-"`
@@ -6566,6 +7355,11 @@ type ElicitationContentValue struct {
 	Boolean *ElicitationContentValueBoolean `json:"-"`
 	// String array value accepted in elicitation response content.
 	StringArray *ElicitationContentValueStringArray `json:"-"`
+	// Any other JSON value, such as the value of a custom or future property type.
+	//
+	// Preserved as sent. Agents validate it against the requested schema like any
+	// other value.
+	Other *ElicitationContentValueOther `json:"-"`
 }
 
 func (u *ElicitationContentValue) UnmarshalJSON(b []byte) error {
@@ -6576,6 +7370,11 @@ func (u *ElicitationContentValue) UnmarshalJSON(b []byte) error {
 		if _, ok := err.(*json.UnmarshalTypeError); !ok {
 			return err
 		}
+	}
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		var v ElicitationContentValueOther = append([]byte(nil), b...)
+		u.Other = &v
+		return nil
 	}
 	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
 		return errors.New("no matching null variant")
@@ -6618,6 +7417,13 @@ func (u *ElicitationContentValue) UnmarshalJSON(b []byte) error {
 			return nil
 		}
 	}
+	{
+		var v ElicitationContentValueOther
+		if json.Unmarshal(b, &v) == nil {
+			u.Other = &v
+			return nil
+		}
+	}
 	return errors.New("no matching variant for union")
 }
 func (u ElicitationContentValue) MarshalJSON() ([]byte, error) {
@@ -6656,6 +7462,13 @@ func (u ElicitationContentValue) MarshalJSON() ([]byte, error) {
 		}
 		return _b, nil
 	}
+	if u.Other != nil {
+		_b, _e := json.Marshal(*u.Other)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		return _b, nil
+	}
 	return []byte{}, nil
 }
 
@@ -6674,6 +7487,9 @@ func (u *ElicitationContentValue) Validate() error {
 		count++
 	}
 	if u.StringArray != nil {
+		count++
+	}
+	if u.Other != nil {
 		count++
 	}
 	if count < 1 {
@@ -6696,7 +7512,7 @@ func (u *ElicitationContentValue) Validate() error {
 type ElicitationFormCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -6784,6 +7600,30 @@ type ElicitationFormModeRequest struct {
 	RequestId RequestId `json:"requestId"`
 	// A JSON Schema describing the form fields to present to the user.
 	RequestedSchema ElicitationSchema `json:"requestedSchema"`
+}
+
+func (v *ElicitationFormModeRequest) UnmarshalJSON(b []byte) error {
+	*v = ElicitationFormModeRequest{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["requestId"]
+		if !ok {
+			return fmt.Errorf("requestId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("requestId must not be null")
+		}
+	}
+	type Alias ElicitationFormModeRequest
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = ElicitationFormModeRequest(a)
+	return nil
 }
 
 type ElicitationFormMode struct {
@@ -7005,7 +7845,7 @@ type ElicitationId string
 type ElicitationPropertySchemaString struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -7065,6 +7905,18 @@ func (v *ElicitationPropertySchemaString) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("type must not be null")
 		}
 	}
+	if raw, ok := m["enum"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("enum requires at least %d items", 1)
+		}
+	}
+	if raw, ok := m["oneOf"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("oneOf requires at least %d items", 1)
+		}
+	}
 	type Alias ElicitationPropertySchemaString
 	var a Alias
 	var raw struct {
@@ -7110,7 +7962,7 @@ func (v *ElicitationPropertySchemaString) UnmarshalJSON(b []byte) error {
 type ElicitationPropertySchemaNumber struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -7197,7 +8049,7 @@ func (v *ElicitationPropertySchemaNumber) UnmarshalJSON(b []byte) error {
 type ElicitationPropertySchemaInteger struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -7284,7 +8136,7 @@ func (v *ElicitationPropertySchemaInteger) UnmarshalJSON(b []byte) error {
 type ElicitationPropertySchemaBoolean struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -7363,7 +8215,7 @@ func (v *ElicitationPropertySchemaBoolean) UnmarshalJSON(b []byte) error {
 type ElicitationPropertySchemaArray struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -7804,7 +8656,7 @@ func (v *ElicitationRequestScope) UnmarshalJSON(b []byte) error {
 type ElicitationSchema struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -7813,8 +8665,6 @@ type ElicitationSchema struct {
 	// Optional. Omitted and 'null' are equivalent and mean no schema description is provided.
 	Description *string `json:"description,omitempty"`
 	// Property definitions (must be primitive types).
-	//
-	// Defaults to {} if unset.
 	Properties map[string]any `json:"properties"`
 	// List of required property names.
 	//
@@ -7824,21 +8674,8 @@ type ElicitationSchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
-	// Type discriminator. Always '"object"'. Omitted means '"object"'; any other value is
-	// rejected.
-	//
-	// Defaults to "object" if unset.
-	Type ElicitationSchemaType `json:"type,omitempty"`
-}
-
-func (v ElicitationSchema) MarshalJSON() ([]byte, error) {
-	type Alias ElicitationSchema
-	var a Alias
-	a = Alias(v)
-	if a.Properties == nil {
-		json.Unmarshal([]byte("{}"), &a.Properties)
-	}
-	return json.Marshal(a)
+	// Type discriminator. Always '"object"'. Any other value is rejected.
+	Type ElicitationSchemaType `json:"type"`
 }
 
 func (v *ElicitationSchema) UnmarshalJSON(b []byte) error {
@@ -7846,6 +8683,24 @@ func (v *ElicitationSchema) UnmarshalJSON(b []byte) error {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil {
 		return err
+	}
+	{
+		raw, ok := m["properties"]
+		if !ok {
+			return fmt.Errorf("properties is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("properties must not be null")
+		}
+	}
+	{
+		raw, ok := m["type"]
+		if !ok {
+			return fmt.Errorf("type is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("type must not be null")
+		}
 	}
 	type Alias ElicitationSchema
 	var a Alias
@@ -7875,18 +8730,6 @@ func (v *ElicitationSchema) UnmarshalJSON(b []byte) error {
 		var value *string
 		if json.Unmarshal(raw.Title, &value) == nil {
 			a.Title = value
-		}
-	}
-	{
-		_rm, _ok := m["properties"]
-		if !_ok || (string(_rm) == "null") {
-			json.Unmarshal([]byte("{}"), &a.Properties)
-		}
-	}
-	{
-		_rm, _ok := m["type"]
-		if !_ok || (string(_rm) == "null") {
-			json.Unmarshal([]byte("\"object\""), &a.Type)
 		}
 	}
 	*v = ElicitationSchema(a)
@@ -7970,7 +8813,7 @@ func (v *ElicitationSessionScope) UnmarshalJSON(b []byte) error {
 type ElicitationUrlCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -8062,6 +8905,30 @@ type ElicitationUrlModeRequest struct {
 	RequestId RequestId `json:"requestId"`
 	// The URL to direct the user to.
 	Url string `json:"url"`
+}
+
+func (v *ElicitationUrlModeRequest) UnmarshalJSON(b []byte) error {
+	*v = ElicitationUrlModeRequest{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["requestId"]
+		if !ok {
+			return fmt.Errorf("requestId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("requestId must not be null")
+		}
+	}
+	type Alias ElicitationUrlModeRequest
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = ElicitationUrlModeRequest(a)
+	return nil
 }
 
 type ElicitationUrlMode struct {
@@ -8305,7 +9172,7 @@ func (u *ElicitationUrlMode) Validate() error {
 type EmbeddedResource struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -8518,7 +9385,7 @@ func (u *EmbeddedResourceResource) Validate() error {
 type EnumOption struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -8587,7 +9454,7 @@ func (v *EnumOption) UnmarshalJSON(b []byte) error {
 type EnvVariable struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -8654,8 +9521,10 @@ type Error struct {
 	// Optional primitive or structured value that contains additional information about the error.
 	// This may include debugging information or context-specific details.
 	//
-	// Omitted and 'null' are equivalent and mean no additional data is provided.
-	Data any `json:"data,omitempty"`
+	// Omitted and 'null' are equivalent and mean no additional data is provided. Some codes
+	// define a shape: ['UnsupportedProtocolVersionErrorData'] for '-32022', and
+	// ['SessionNotFoundErrorData'] for '-32002' when a session is not found.
+	Data *ErrorData `json:"data,omitempty"`
 	// A string providing a short description of the error.
 	// The message should be limited to a concise single sentence.
 	Message string `json:"message"`
@@ -8696,7 +9565,7 @@ func (v *Error) UnmarshalJSON(b []byte) error {
 	}
 	a = raw.Alias
 	{
-		var value any
+		var value *ErrorData
 		if json.Unmarshal(raw.Data, &value) == nil {
 			a.Data = value
 		}
@@ -8737,7 +9606,7 @@ type ErrorCodeAuthenticationRequired int32
 type ErrorCodeResourceNotFound int32
 
 // **Unsupported protocol version**: No protocol version supported by the Agent is at or below the requested version.
-// The error data contains the requested version and the Agent's supported versions.
+// The error data is an ['UnsupportedProtocolVersionErrorData'].
 type ErrorCodeUnsupportedProtocolVersion int32
 
 // Other undefined error code.
@@ -8763,7 +9632,7 @@ type ErrorCode struct {
 	// **Resource not found**: A given resource, such as a session, was not found.
 	ResourceNotFound *ErrorCodeResourceNotFound `json:"-"`
 	// **Unsupported protocol version**: No protocol version supported by the Agent is at or below the requested version.
-	// The error data contains the requested version and the Agent's supported versions.
+	// The error data is an ['UnsupportedProtocolVersionErrorData'].
 	UnsupportedProtocolVersion *ErrorCodeUnsupportedProtocolVersion `json:"-"`
 	// Other undefined error code.
 	Other *ErrorCodeOther `json:"-"`
@@ -8940,6 +9809,169 @@ func (u *ErrorCode) Validate() error {
 	return nil
 }
 
+// Schema for ['Error::data']: the shapes ACP defines, or any other value.
+type ErrorDataOther = json.RawMessage
+
+type ErrorData struct {
+	UnsupportedProtocolVersion *UnsupportedProtocolVersionErrorData `json:"-"`
+	SessionNotFound            *SessionNotFoundErrorData            `json:"-"`
+	Other                      *ErrorDataOther                      `json:"-"`
+}
+
+func (u *ErrorData) UnmarshalJSON(b []byte) error {
+	*u = ErrorData{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err == nil {
+		{
+			var v UnsupportedProtocolVersionErrorData
+			var match bool = true
+			{
+				raw, ok := m["requested"]
+				if !ok {
+					match = false
+				}
+				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					match = false
+				}
+				if ok {
+					var value ProtocolVersion
+					if json.Unmarshal(raw, &value) != nil {
+						match = false
+					}
+				}
+			}
+			{
+				raw, ok := m["supported"]
+				if !ok {
+					match = false
+				}
+				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					match = false
+				}
+				if ok {
+					var value []ProtocolVersion
+					if json.Unmarshal(raw, &value) != nil {
+						match = false
+					}
+				}
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.UnsupportedProtocolVersion = &v
+				return nil
+			}
+		}
+		{
+			var v SessionNotFoundErrorData
+			var match bool = true
+			{
+				raw, ok := m["sessionId"]
+				if !ok {
+					match = false
+				}
+				if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+					match = false
+				}
+				if ok {
+					var value SessionId
+					if json.Unmarshal(raw, &value) != nil {
+						match = false
+					}
+				}
+			}
+			if match {
+				if json.Unmarshal(b, &v) != nil {
+					return errors.New("invalid variant payload")
+				}
+				u.SessionNotFound = &v
+				return nil
+			}
+		}
+	} else {
+		if _, ok := err.(*json.UnmarshalTypeError); !ok {
+			return err
+		}
+	}
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		var v ErrorDataOther = append([]byte(nil), b...)
+		u.Other = &v
+		return nil
+	}
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		return errors.New("no matching null variant")
+	}
+	var arr []map[string]json.RawMessage
+	if json.Unmarshal(b, &arr) == nil {
+	}
+	{
+		var v ErrorDataOther
+		if json.Unmarshal(b, &v) == nil {
+			u.Other = &v
+			return nil
+		}
+	}
+	return errors.New("no matching variant for union")
+}
+func (u ErrorData) MarshalJSON() ([]byte, error) {
+	if u.UnsupportedProtocolVersion != nil {
+		_b, _e := json.Marshal(*u.UnsupportedProtocolVersion)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	if u.SessionNotFound != nil {
+		_b, _e := json.Marshal(*u.SessionNotFound)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(_b, &m) != nil {
+			return []byte{}, errors.New("invalid variant payload")
+		}
+		return json.Marshal(m)
+	}
+	if u.Other != nil {
+		_b, _e := json.Marshal(*u.Other)
+		if _e != nil {
+			return []byte{}, _e
+		}
+		return _b, nil
+	}
+	return []byte{}, nil
+}
+
+func (u *ErrorData) Validate() error {
+	var count int
+	if u.UnsupportedProtocolVersion != nil {
+		count++
+	}
+	if u.SessionNotFound != nil {
+		count++
+	}
+	if u.Other != nil {
+		count++
+	}
+	if count < 1 {
+		return errors.New("ErrorData must have at least one variant set")
+	}
+	encoded, err := json.Marshal(*u)
+	if err != nil {
+		return err
+	}
+	var decoded ErrorData
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return fmt.Errorf("ErrorData: %w", err)
+	}
+	return nil
+}
+
 // Details of a failure that ended active work.
 type ErrorStopReason struct {
 	// The failure, as a JSON-RPC error object.
@@ -9003,7 +10035,7 @@ type ExtResponse any
 type HttpHeader struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -9061,7 +10093,7 @@ func (v *HttpHeader) UnmarshalJSON(b []byte) error {
 type Icon struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -9077,7 +10109,9 @@ type Icon struct {
 	//
 	// Omitted and 'null' are equivalent and mean no sizes are specified.
 	Sizes []string `json:"sizes,omitempty"`
-	// A standard URI pointing to an icon resource.
+	// A standard URI pointing to an icon resource. MUST be an 'https:' or 'data:' URI.
+	// Clients reject other schemes, fetch without credentials, and do not follow
+	// scheme- or origin-changing redirects.
 	Src string `json:"src"`
 	// Optional theme this icon is designed for.
 	//
@@ -9168,11 +10202,20 @@ const (
 type IdleStateUpdateEndTurn struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
-	StopReason string                     `json:"stopReason"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	StopReason string           `json:"stopReason"`
 }
 
 func (v *IdleStateUpdateEndTurn) UnmarshalJSON(b []byte) error {
@@ -9194,7 +10237,8 @@ func (v *IdleStateUpdateEndTurn) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -9206,6 +10250,12 @@ func (v *IdleStateUpdateEndTurn) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = IdleStateUpdateEndTurn(a)
 	return nil
 }
@@ -9214,11 +10264,20 @@ func (v *IdleStateUpdateEndTurn) UnmarshalJSON(b []byte) error {
 type IdleStateUpdateMaxTokens struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
-	StopReason string                     `json:"stopReason"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	StopReason string           `json:"stopReason"`
 }
 
 func (v *IdleStateUpdateMaxTokens) UnmarshalJSON(b []byte) error {
@@ -9240,7 +10299,8 @@ func (v *IdleStateUpdateMaxTokens) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -9252,20 +10312,35 @@ func (v *IdleStateUpdateMaxTokens) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = IdleStateUpdateMaxTokens(a)
 	return nil
 }
 
 // The active work ended because the agent reached the maximum number of
-// allowed agent requests before returning idle.
+// model requests for the foreground work.
 type IdleStateUpdateMaxTurnRequests struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
-	StopReason string                     `json:"stopReason"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	StopReason string           `json:"stopReason"`
 }
 
 func (v *IdleStateUpdateMaxTurnRequests) UnmarshalJSON(b []byte) error {
@@ -9287,7 +10362,8 @@ func (v *IdleStateUpdateMaxTurnRequests) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -9299,21 +10375,34 @@ func (v *IdleStateUpdateMaxTurnRequests) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = IdleStateUpdateMaxTurnRequests(a)
 	return nil
 }
 
-// The active work ended because the agent refused to continue. The user
-// prompt and everything that comes after it won't be included in the next
-// prompt, so this should be reflected in the UI.
+// The active work ended because the agent refused to continue.
 type IdleStateUpdateRefusal struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
-	StopReason string                     `json:"stopReason"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	StopReason string           `json:"stopReason"`
 }
 
 func (v *IdleStateUpdateRefusal) UnmarshalJSON(b []byte) error {
@@ -9335,7 +10424,8 @@ func (v *IdleStateUpdateRefusal) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -9347,13 +10437,21 @@ func (v *IdleStateUpdateRefusal) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = IdleStateUpdateRefusal(a)
 	return nil
 }
 
-// The client cancelled the work, via 'session/cancel' or by closing the
-// session. Work the agent stops on its own uses another reason, such as
-// 'error' for an internal timeout.
+// The user or client chose to stop the work: via 'session/cancel', by
+// closing the session, or through an interaction the agent offers, such
+// as a permission option that tells the agent to stop. Work the agent
+// stops for its own reasons uses another reason, such as 'error' for an
+// internal timeout.
 //
 // Agents MUST report this stop reason on an idle 'state_update' when
 // cancellation ends active foreground work, even if aborting causes
@@ -9362,11 +10460,20 @@ func (v *IdleStateUpdateRefusal) UnmarshalJSON(b []byte) error {
 type IdleStateUpdateCancelled struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
-	StopReason string                     `json:"stopReason"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	StopReason string           `json:"stopReason"`
 }
 
 func (v *IdleStateUpdateCancelled) UnmarshalJSON(b []byte) error {
@@ -9388,7 +10495,8 @@ func (v *IdleStateUpdateCancelled) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -9400,6 +10508,12 @@ func (v *IdleStateUpdateCancelled) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = IdleStateUpdateCancelled(a)
 	return nil
 }
@@ -9407,15 +10521,24 @@ func (v *IdleStateUpdateCancelled) UnmarshalJSON(b []byte) error {
 // The active work ended because something failed.
 //
 // This includes pre-insertion foreground work. A prompt failure before
-// insertion also requires an error response to 'session/prompt'; after
+// insertion also requires an error response to 'session/prompt'. After
 // insertion, the prompt's response remains successful.
 type IdleStateUpdateError struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
 	// The failure, as a JSON-RPC error object.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean the agent is not reporting failure details.
@@ -9443,8 +10566,9 @@ func (v *IdleStateUpdateError) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta  json.RawMessage `json:"_meta"`
-		Error json.RawMessage `json:"error"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
+		Error      json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -9454,6 +10578,12 @@ func (v *IdleStateUpdateError) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
 		}
 	}
 	{
@@ -9477,11 +10607,20 @@ type IdleStateUpdateOther = json.RawMessage
 type IdleStateUpdateNone struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta       map[string]json.RawMessage `json:"_meta,omitempty"`
-	StopReason any                        `json:"stopReason,omitempty"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	StopReason any              `json:"stopReason,omitempty"`
 }
 
 func (v *IdleStateUpdateNone) UnmarshalJSON(b []byte) error {
@@ -9495,6 +10634,7 @@ func (v *IdleStateUpdateNone) UnmarshalJSON(b []byte) error {
 	var raw struct {
 		Alias
 		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 		StopReason json.RawMessage `json:"stopReason"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -9505,6 +10645,12 @@ func (v *IdleStateUpdateNone) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
 		}
 	}
 	{
@@ -9520,15 +10666,15 @@ type IdleStateUpdate struct {
 	// The active work ended because the agent reached the maximum number of tokens.
 	MaxTokens *IdleStateUpdateMaxTokens `json:"-"`
 	// The active work ended because the agent reached the maximum number of
-	// allowed agent requests before returning idle.
+	// model requests for the foreground work.
 	MaxTurnRequests *IdleStateUpdateMaxTurnRequests `json:"-"`
-	// The active work ended because the agent refused to continue. The user
-	// prompt and everything that comes after it won't be included in the next
-	// prompt, so this should be reflected in the UI.
+	// The active work ended because the agent refused to continue.
 	Refusal *IdleStateUpdateRefusal `json:"-"`
-	// The client cancelled the work, via 'session/cancel' or by closing the
-	// session. Work the agent stops on its own uses another reason, such as
-	// 'error' for an internal timeout.
+	// The user or client chose to stop the work: via 'session/cancel', by
+	// closing the session, or through an interaction the agent offers, such
+	// as a permission option that tells the agent to stop. Work the agent
+	// stops for its own reasons uses another reason, such as 'error' for an
+	// internal timeout.
 	//
 	// Agents MUST report this stop reason on an idle 'state_update' when
 	// cancellation ends active foreground work, even if aborting causes
@@ -9538,7 +10684,7 @@ type IdleStateUpdate struct {
 	// The active work ended because something failed.
 	//
 	// This includes pre-insertion foreground work. A prompt failure before
-	// insertion also requires an error response to 'session/prompt'; after
+	// insertion also requires an error response to 'session/prompt'. After
 	// insertion, the prompt's response remains successful.
 	Error *IdleStateUpdateError `json:"-"`
 	// Custom or future stop reason.
@@ -9867,7 +11013,7 @@ func (u *IdleStateUpdate) Validate() error {
 type ImageContent struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -9949,14 +11095,14 @@ func (v *ImageContent) UnmarshalJSON(b []byte) error {
 type Implementation struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Intended for programmatic or logical use, but can be used as a display
-	// name fallback if title isn’t present.
+	// name fallback if title isn't present.
 	Name string `json:"name"`
-	// Intended for UI and end-user contexts — optimized to be human-readable
+	// Intended for UI and end-user contexts and optimized to be human-readable
 	// and easily understood.
 	//
 	// If not provided, the name should be used for display.
@@ -10027,7 +11173,7 @@ func (v *Implementation) UnmarshalJSON(b []byte) error {
 type InitializeRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10117,14 +11263,14 @@ func (v *InitializeRequest) Validate() error {
 type InitializeResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Authentication methods supported by the agent.
 	//
 	// Optional. Omitted or empty means the agent does not advertise the
-	// authentication method surface. Supplying one or more valid methods means
+	// 'auth/login' and 'auth/logout' methods. Supplying one or more methods means
 	// the agent MUST support both 'auth/login' and 'auth/logout'.
 	AuthMethods []AuthMethod `json:"authMethods,omitempty"`
 	// Capabilities supported by the agent.
@@ -10227,7 +11373,7 @@ func (v *InitializeResponse) Validate() error {
 type IntegerPropertySchema struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10304,7 +11450,7 @@ func (v *IntegerPropertySchema) UnmarshalJSON(b []byte) error {
 type ListSessionsRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10313,6 +11459,9 @@ type ListSessionsRequest struct {
 	// Omitted and 'null' are equivalent and mean the first page is requested.
 	Cursor *SessionListCursor `json:"cursor,omitempty"`
 	// Filter sessions by working directory. Must be an absolute path.
+	//
+	// Only sessions whose 'cwd' is this same directory match. Subdirectories and
+	// 'additionalDirectories' don't. Agents MAY normalize paths when comparing.
 	//
 	// Omitted and 'null' are equivalent and mean sessions are not filtered by working directory.
 	Cwd *AbsolutePath `json:"cwd,omitempty"`
@@ -10352,13 +11501,13 @@ func (v *ListSessionsRequest) Validate() error {
 type ListSessionsResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Opaque cursor token. If present, pass this in the next request's cursor parameter
 	// to fetch the next page. Omitted and 'null' are equivalent and mean there are no more
-	// results.
+	// results. An empty string is a valid cursor, not the end of results.
 	NextCursor *SessionListCursor `json:"nextCursor,omitempty"`
 	// Array of session information objects.
 	Sessions []SessionInfo `json:"sessions"`
@@ -10423,13 +11572,13 @@ func (v *ListSessionsResponse) Validate() error {
 //
 // Specifies which authentication method to use.
 //
-// Agents MUST support this method when their 'initialize' response advertised
-// at least one valid authentication method. Clients MUST NOT call this method
+// Agents MUST support this method when their 'initialize' response included
+// a non-empty 'authMethods' list. Clients MUST NOT call this method
 // when 'authMethods' was omitted or empty.
 type LoginAuthRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10481,7 +11630,7 @@ func (v *LoginAuthRequest) Validate() error {
 type LoginAuthResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10521,13 +11670,13 @@ func (v *LoginAuthResponse) Validate() error {
 //
 // Terminates the current authenticated session.
 //
-// Agents MUST support this method when their 'initialize' response advertised
-// at least one valid authentication method. Clients MUST NOT call this method
+// Agents MUST support this method when their 'initialize' response included
+// a non-empty 'authMethods' list. Clients MUST NOT call this method
 // when 'authMethods' was omitted or empty.
 type LogoutAuthRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10567,7 +11716,7 @@ func (v *LogoutAuthRequest) Validate() error {
 type LogoutAuthResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10607,7 +11756,7 @@ func (v *LogoutAuthResponse) Validate() error {
 type McpCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10669,7 +11818,7 @@ func (v *McpCapabilities) UnmarshalJSON(b []byte) error {
 type McpHttpCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10713,11 +11862,12 @@ func (v *McpHttpCapabilities) UnmarshalJSON(b []byte) error {
 type McpServerHttpInline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// HTTP headers to set when making requests to the MCP server.
+	// HTTP headers to set when making requests to the MCP server. Headers the MCP transport
+	// defines are owned by the transport, and Agents use the transport's values for them.
 	Headers []HttpHeader `json:"headers,omitempty"`
 	// Human-readable name identifying this MCP server.
 	Name string `json:"name"`
@@ -10808,7 +11958,7 @@ func (v *McpServerHttpInline) UnmarshalJSON(b []byte) error {
 type McpServerStdioInline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -10816,7 +11966,8 @@ type McpServerStdioInline struct {
 	Args []string `json:"args,omitempty"`
 	// Absolute path to the MCP server executable.
 	Command AbsolutePath `json:"command"`
-	// Environment variables to set when launching the MCP server.
+	// Environment variables to set when launching the MCP server. Names SHOULD be unique.
+	// Agents MAY reject duplicates with '-32602', and otherwise the last entry wins.
 	Env []EnvVariable `json:"env,omitempty"`
 	// Human-readable name identifying this MCP server.
 	Name string `json:"name"`
@@ -11163,11 +12314,12 @@ func (u *McpServer) Validate() error {
 type McpServerHttp struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// HTTP headers to set when making requests to the MCP server.
+	// HTTP headers to set when making requests to the MCP server. Headers the MCP transport
+	// defines are owned by the transport, and Agents use the transport's values for them.
 	Headers []HttpHeader `json:"headers,omitempty"`
 	// Human-readable name identifying this MCP server.
 	Name string `json:"name"`
@@ -11246,7 +12398,7 @@ func (v *McpServerHttp) UnmarshalJSON(b []byte) error {
 type McpServerStdio struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -11254,7 +12406,8 @@ type McpServerStdio struct {
 	Args []string `json:"args,omitempty"`
 	// Absolute path to the MCP server executable.
 	Command AbsolutePath `json:"command"`
-	// Environment variables to set when launching the MCP server.
+	// Environment variables to set when launching the MCP server. Names SHOULD be unique.
+	// Agents MAY reject duplicates with '-32602', and otherwise the last entry wins.
 	Env []EnvVariable `json:"env,omitempty"`
 	// Human-readable name identifying this MCP server.
 	Name string `json:"name"`
@@ -11356,7 +12509,7 @@ func (v *McpServerStdio) UnmarshalJSON(b []byte) error {
 type McpStdioCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -11403,7 +12556,7 @@ type MessageId string
 type MultiSelectItemsString struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -11434,6 +12587,12 @@ func (v *MultiSelectItemsString) UnmarshalJSON(b []byte) error {
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return fmt.Errorf("type must not be null")
+		}
+	}
+	if raw, ok := m["enum"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("enum requires at least %d items", 1)
 		}
 	}
 	type Alias MultiSelectItemsString
@@ -11643,7 +12802,7 @@ func (u *MultiSelectItems) Validate() error {
 type MultiSelectPropertySchema struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -11739,7 +12898,7 @@ func (v *MultiSelectPropertySchema) UnmarshalJSON(b []byte) error {
 type NewSessionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -11850,17 +13009,21 @@ func (v *NewSessionRequest) Validate() error {
 type NewSessionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Initial commands the agent can execute in this session.
 	//
 	// Optional. Omitted or empty means no initial commands are advertised.
-	// Senders MUST use an array, not 'null'; receivers treat 'null' like omission.
+	// Senders MUST use an array, not 'null'. Receivers treat 'null' like omission.
 	// Later 'available_commands_update' notifications replace this list.
 	AvailableCommands []AvailableCommand `json:"availableCommands,omitempty"`
 	// Initial session configuration options.
+	//
+	// Optional. Omitted or empty means no config options are advertised.
+	// Senders MUST use an array, not 'null'. Receivers treat 'null' like omission.
+	// Later 'config_option_update' notifications replace this list.
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	// Unique identifier for the created session.
 	//
@@ -11943,7 +13106,7 @@ func (v *NewSessionResponse) Validate() error {
 type Notice struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12029,7 +13192,7 @@ const (
 type NumberPropertySchema struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12106,7 +13269,7 @@ func (v *NumberPropertySchema) UnmarshalJSON(b []byte) error {
 type PermissionOption struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12114,7 +13277,7 @@ type PermissionOption struct {
 	Kind PermissionOptionKind `json:"kind"`
 	// Human-readable label to display to the user.
 	Name string `json:"name"`
-	// Unique identifier for this permission option.
+	// Identifier for this permission option. MUST be unique within the request.
 	OptionId PermissionOptionId `json:"optionId"`
 }
 
@@ -12194,7 +13357,7 @@ const (
 type PlanEntry struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12293,7 +13456,7 @@ type PlanId string
 type PlanItems struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12373,7 +13536,7 @@ func (v *PlanItems) UnmarshalJSON(b []byte) error {
 type PlanUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12421,7 +13584,7 @@ func (v *PlanUpdate) UnmarshalJSON(b []byte) error {
 type PlanUpdateContentItems struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12515,7 +13678,8 @@ func (v *PlanUpdateContentItems) UnmarshalJSON(b []byte) error {
 //
 // Receivers that do not understand this content type should preserve the
 // raw payload when storing, replaying, proxying, or forwarding plans, and
-// otherwise ignore it or display it generically.
+// otherwise ignore it or display it generically. It still replaces any earlier
+// content for the same 'planId'.
 type PlanUpdateContentOther = json.RawMessage
 
 type PlanUpdateContent struct {
@@ -12529,7 +13693,8 @@ type PlanUpdateContent struct {
 	//
 	// Receivers that do not understand this content type should preserve the
 	// raw payload when storing, replaying, proxying, or forwarding plans, and
-	// otherwise ignore it or display it generically.
+	// otherwise ignore it or display it generically. It still replaces any earlier
+	// content for the same 'planId'.
 	Other *PlanUpdateContentOther `json:"-"`
 }
 
@@ -12696,7 +13861,7 @@ func (u *PlanUpdateContent) Validate() error {
 type PromptAudioCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12743,7 +13908,7 @@ func (v *PromptAudioCapabilities) UnmarshalJSON(b []byte) error {
 type PromptCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12820,7 +13985,7 @@ func (v *PromptCapabilities) UnmarshalJSON(b []byte) error {
 type PromptEmbeddedContextCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12858,7 +14023,7 @@ func (v *PromptEmbeddedContextCapabilities) UnmarshalJSON(b []byte) error {
 type PromptImageCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12898,7 +14063,7 @@ func (v *PromptImageCapabilities) UnmarshalJSON(b []byte) error {
 type PromptRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -12915,6 +14080,9 @@ type PromptRequest struct {
 	// When available, 'resource' is preferred
 	// as it avoids extra round-trips and allows the message to include
 	// pieces of context from sources the agent may not have access to.
+	//
+	// Clients MUST NOT send an empty array. Agents MAY reject one with '-32602' without
+	// inserting it.
 	Prompt []ContentBlock `json:"prompt"`
 	// The ID of the session to send this user message to
 	SessionId SessionId `json:"sessionId"`
@@ -12944,6 +14112,12 @@ func (v *PromptRequest) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("sessionId must not be null")
 		}
 	}
+	if raw, ok := m["prompt"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("prompt requires at least %d items", 1)
+		}
+	}
 	type Alias PromptRequest
 	var a Alias
 	var raw struct {
@@ -12965,6 +14139,9 @@ func (v *PromptRequest) UnmarshalJSON(b []byte) error {
 }
 
 func (v *PromptRequest) Validate() error {
+	if len(v.Prompt) < 1 {
+		return fmt.Errorf("prompt requires at least %d items", 1)
+	}
 	if v.Prompt == nil {
 		return fmt.Errorf("prompt is required")
 	}
@@ -12978,7 +14155,7 @@ func (v *PromptRequest) Validate() error {
 
 // Response acknowledging that a user prompt was inserted into the ACP conversation.
 //
-// This response does not indicate that the prompt was merely received or queued, nor that the
+// This response does not indicate that the prompt was merely received or held, nor that the
 // agent has finished processing it.
 // Processing and completion are reported through 'state_update' session updates.
 //
@@ -12989,7 +14166,7 @@ func (v *PromptRequest) Validate() error {
 type PromptResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13042,42 +14219,6 @@ func (v *PromptResponse) Validate() error {
 	return nil
 }
 
-// A JSON-RPC notification object.
-type ProtocolLevelNotification struct {
-	// The notification method name.
-	Method string `json:"method"`
-	// Method-specific notification parameters.
-	Params any `json:"params,omitempty"`
-}
-
-func (v *ProtocolLevelNotification) UnmarshalJSON(b []byte) error {
-	*v = ProtocolLevelNotification{}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err != nil {
-		return err
-	}
-	{
-		raw, ok := m["method"]
-		if !ok {
-			return fmt.Errorf("method is required")
-		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("method must not be null")
-		}
-	}
-	type Alias ProtocolLevelNotification
-	var a Alias
-	if err := json.Unmarshal(b, &a); err != nil {
-		return err
-	}
-	*v = ProtocolLevelNotification(a)
-	return nil
-}
-
-func (v *ProtocolLevelNotification) Validate() error {
-	return nil
-}
-
 // Protocol version identifier.
 //
 // This version is only bumped for breaking changes.
@@ -13091,7 +14232,7 @@ type ProtocolVersion uint16
 type ReplayFromStartInline struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13281,7 +14422,7 @@ func (u *ReplayFrom) Validate() error {
 type ReplayFromStart struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13315,7 +14456,9 @@ func (v *ReplayFromStart) UnmarshalJSON(b []byte) error {
 
 // A JSON-RPC request ID: a string or an integer. Unlike base JSON-RPC, it MUST NOT be 'null'.
 //
-// The receiver MUST reply with the same value in the response.
+// The receiver MUST reply with the same value in the response. Each side chooses IDs for its own
+// requests, so the same ID can be in use in both directions. A sender MUST NOT reuse an ID while
+// a request with it is still awaiting a response.
 // A numeric request ID.
 type RequestIdNumber int64
 
@@ -13401,19 +14544,20 @@ func (u *RequestId) Validate() error {
 }
 
 // The outcome of a permission request.
-// The session's work was cancelled before the user responded.
+// The request was not approved and no option was selected: the session's work was
+// cancelled, the user dismissed the prompt, or the client declined it by policy.
+// Agents MUST NOT proceed with the operation.
 //
-// When a client sends a 'session/cancel' notification, it MUST respond to all
-// pending 'session/request_permission' requests in that session with this
-// 'cancelled' outcome, without answering any request twice. Requests in other
-// sessions are unaffected. Agents treat 'cancelled' for background work as a
-// denial.
+// The client answers a request the agent cancels with '$/cancel_request' with
+// this outcome. After sending 'session/cancel', the client MAY also send it
+// without waiting for '$/cancel_request', for a request it knows belongs to the
+// cancelled foreground work.
 //
 // See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#cancellation)
 type RequestPermissionOutcomeCancelled struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta    map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13456,10 +14600,13 @@ func (v *RequestPermissionOutcomeCancelled) UnmarshalJSON(b []byte) error {
 }
 
 // The user selected one of the provided options.
+//
+// If 'optionId' doesn't match an offered option, the agent MUST treat the request as not
+// approved.
 type RequestPermissionOutcomeSelected struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13525,17 +14672,21 @@ func (v *RequestPermissionOutcomeSelected) UnmarshalJSON(b []byte) error {
 type RequestPermissionOutcomeOther = json.RawMessage
 
 type RequestPermissionOutcome struct {
-	// The session's work was cancelled before the user responded.
+	// The request was not approved and no option was selected: the session's work was
+	// cancelled, the user dismissed the prompt, or the client declined it by policy.
+	// Agents MUST NOT proceed with the operation.
 	//
-	// When a client sends a 'session/cancel' notification, it MUST respond to all
-	// pending 'session/request_permission' requests in that session with this
-	// 'cancelled' outcome, without answering any request twice. Requests in other
-	// sessions are unaffected. Agents treat 'cancelled' for background work as a
-	// denial.
+	// The client answers a request the agent cancels with '$/cancel_request' with
+	// this outcome. After sending 'session/cancel', the client MAY also send it
+	// without waiting for '$/cancel_request', for a request it knows belongs to the
+	// cancelled foreground work.
 	//
 	// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#cancellation)
 	Cancelled *RequestPermissionOutcomeCancelled `json:"-"`
 	// The user selected one of the provided options.
+	//
+	// If 'optionId' doesn't match an offered option, the agent MUST treat the request as not
+	// approved.
 	Selected *RequestPermissionOutcomeSelected `json:"-"`
 	// Custom or future permission outcome.
 	//
@@ -13722,7 +14873,7 @@ func (u *RequestPermissionOutcome) Validate() error {
 type RequestPermissionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13781,6 +14932,12 @@ func (v *RequestPermissionRequest) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("title must not be null")
 		}
 	}
+	if raw, ok := m["options"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("options requires at least %d items", 1)
+		}
+	}
 	type Alias RequestPermissionRequest
 	var a Alias
 	var raw struct {
@@ -13809,6 +14966,9 @@ func (v *RequestPermissionRequest) UnmarshalJSON(b []byte) error {
 }
 
 func (v *RequestPermissionRequest) Validate() error {
+	if len(v.Options) < 1 {
+		return fmt.Errorf("options requires at least %d items", 1)
+	}
 	if v.Options == nil {
 		return fmt.Errorf("options is required")
 	}
@@ -13819,7 +14979,7 @@ func (v *RequestPermissionRequest) Validate() error {
 type RequestPermissionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13874,7 +15034,7 @@ func (v *RequestPermissionResponse) Validate() error {
 type RequestPermissionSubjectToolCall struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -13935,7 +15095,7 @@ func (v *RequestPermissionSubjectToolCall) UnmarshalJSON(b []byte) error {
 type RequestPermissionSubjectCommand struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14248,10 +15408,19 @@ func (u *RequestPermissionSubject) Validate() error {
 type RequiresActionStateUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
 }
 
 func (v *RequiresActionStateUpdate) UnmarshalJSON(b []byte) error {
@@ -14264,7 +15433,8 @@ func (v *RequiresActionStateUpdate) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -14276,15 +15446,21 @@ func (v *RequiresActionStateUpdate) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = RequiresActionStateUpdate(a)
 	return nil
 }
 
-// A resource that the server is capable of reading, included in a prompt or tool call result.
+// A link to a resource that the receiver may be able to read, included in a prompt or tool call result.
 type ResourceLink struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14417,7 +15593,7 @@ func (v *ResourceLink) UnmarshalJSON(b []byte) error {
 type ResumeSessionRequest struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14429,8 +15605,14 @@ type ResumeSessionRequest struct {
 	// the request 'cwd' matches the session's 'cwd'.
 	AdditionalDirectories []AbsolutePath `json:"additionalDirectories,omitempty"`
 	// The working directory for this session. Must be an absolute path.
+	//
+	// Clients MUST send the session's working directory. Agents MAY reject a different directory
+	// with '-32602', and MAY normalize paths when comparing.
 	Cwd AbsolutePath `json:"cwd"`
 	// List of MCP servers to connect to for this session.
+	//
+	// The complete set of Client-provided servers. Omitted and '[]' mean none. Agents SHOULD
+	// NOT restore servers from earlier requests.
 	McpServers []McpServer `json:"mcpServers,omitempty"`
 	// Inclusive cursor describing where conversation replay should begin.
 	//
@@ -14552,17 +15734,21 @@ func (v *ResumeSessionRequest) Validate() error {
 type ResumeSessionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Initial commands the agent can execute in this session.
 	//
 	// Optional. Omitted or empty means no initial commands are advertised.
-	// Senders MUST use an array, not 'null'; receivers treat 'null' like omission.
+	// Senders MUST use an array, not 'null'. Receivers treat 'null' like omission.
 	// Later 'available_commands_update' notifications replace this list.
 	AvailableCommands []AvailableCommand `json:"availableCommands,omitempty"`
 	// Initial session configuration options.
+	//
+	// Optional. Omitted or empty means no config options are advertised.
+	// Senders MUST use an array, not 'null'. Receivers treat 'null' like omission.
+	// Later 'config_option_update' notifications replace this list.
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
 
@@ -14634,10 +15820,19 @@ const (
 type RunningStateUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
 }
 
 func (v *RunningStateUpdate) UnmarshalJSON(b []byte) error {
@@ -14650,7 +15845,8 @@ func (v *RunningStateUpdate) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -14662,6 +15858,12 @@ func (v *RunningStateUpdate) UnmarshalJSON(b []byte) error {
 			a.Meta = value
 		}
 	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
+		}
+	}
 	*v = RunningStateUpdate(a)
 	return nil
 }
@@ -14670,7 +15872,7 @@ func (v *RunningStateUpdate) UnmarshalJSON(b []byte) error {
 type SelectedPermissionOutcome struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14722,7 +15924,7 @@ func (v *SelectedPermissionOutcome) UnmarshalJSON(b []byte) error {
 type SessionAdditionalDirectoriesCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14768,7 +15970,7 @@ func (v *SessionAdditionalDirectoriesCapabilities) UnmarshalJSON(b []byte) error
 type SessionCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14894,7 +16096,7 @@ type SessionConfigId string
 type SessionConfigOptionSelect struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -14989,7 +16191,7 @@ func (v *SessionConfigOptionSelect) UnmarshalJSON(b []byte) error {
 type SessionConfigOptionBoolean struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -15076,7 +16278,7 @@ func (v *SessionConfigOptionBoolean) UnmarshalJSON(b []byte) error {
 //
 // Clients that do not understand this option type should preserve the raw
 // payload when storing, replaying, proxying, or forwarding configuration
-// data, and otherwise ignore the option or display it generically.
+// data, and otherwise ignore the option. The Agent keeps using its 'currentValue'.
 type SessionConfigOptionOther = json.RawMessage
 
 type SessionConfigOption struct {
@@ -15092,7 +16294,7 @@ type SessionConfigOption struct {
 	//
 	// Clients that do not understand this option type should preserve the raw
 	// payload when storing, replaying, proxying, or forwarding configuration
-	// data, and otherwise ignore the option or display it generically.
+	// data, and otherwise ignore the option. The Agent keeps using its 'currentValue'.
 	Other *SessionConfigOptionOther `json:"-"`
 }
 
@@ -15432,7 +16634,7 @@ func (v *SessionConfigSelect) UnmarshalJSON(b []byte) error {
 type SessionConfigSelectGroup struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -15440,7 +16642,7 @@ type SessionConfigSelectGroup struct {
 	GroupId SessionConfigGroupId `json:"groupId"`
 	// Human-readable label for this group.
 	Name string `json:"name"`
-	// The set of option values in this group.
+	// The set of option values in this group. MUST contain at least one value.
 	Options []SessionConfigSelectOption `json:"options"`
 }
 
@@ -15477,6 +16679,12 @@ func (v *SessionConfigSelectGroup) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("options must not be null")
 		}
 	}
+	if raw, ok := m["options"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("options requires at least %d items", 1)
+		}
+	}
 	type Alias SessionConfigSelectGroup
 	var a Alias
 	var raw struct {
@@ -15505,6 +16713,9 @@ func (v *SessionConfigSelectGroup) UnmarshalJSON(b []byte) error {
 				}
 			}
 		}
+		if len(a.Options) < 1 {
+			return fmt.Errorf("options requires at least %d valid items", 1)
+		}
 	}
 	*v = SessionConfigSelectGroup(a)
 	return nil
@@ -15514,7 +16725,7 @@ func (v *SessionConfigSelectGroup) UnmarshalJSON(b []byte) error {
 type SessionConfigSelectOption struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -15583,8 +16794,36 @@ func (v *SessionConfigSelectOption) UnmarshalJSON(b []byte) error {
 // A flat list of options with no grouping.
 type SessionConfigSelectOptionsUngrouped []SessionConfigSelectOption
 
+func (v *SessionConfigSelectOptionsUngrouped) UnmarshalJSON(b []byte) error {
+	*v = nil
+	type Alias SessionConfigSelectOptionsUngrouped
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	if len(a) < 1 {
+		return fmt.Errorf("SessionConfigSelectOptionsUngrouped requires at least %d items", 1)
+	}
+	*v = SessionConfigSelectOptionsUngrouped(a)
+	return nil
+}
+
 // A list of options grouped under headers.
 type SessionConfigSelectOptionsGrouped []SessionConfigSelectGroup
+
+func (v *SessionConfigSelectOptionsGrouped) UnmarshalJSON(b []byte) error {
+	*v = nil
+	type Alias SessionConfigSelectOptionsGrouped
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	if len(a) < 1 {
+		return fmt.Errorf("SessionConfigSelectOptionsGrouped requires at least %d items", 1)
+	}
+	*v = SessionConfigSelectOptionsGrouped(a)
+	return nil
+}
 
 type SessionConfigSelectOptions struct {
 	// A flat list of options with no grouping.
@@ -15714,7 +16953,7 @@ type SessionConfigValueId string
 type SessionDeleteCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -15748,8 +16987,8 @@ func (v *SessionDeleteCapabilities) UnmarshalJSON(b []byte) error {
 
 // A unique identifier for a conversation session between a client and agent.
 //
-// Sessions maintain their own context, conversation history, and state,
-// allowing multiple independent interactions with the same agent.
+// Each session has its own context, conversation history, and state, so one
+// agent can run several independent sessions.
 //
 // See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/v2/session-setup#session-id)
 type SessionId string
@@ -15758,14 +16997,14 @@ type SessionId string
 type SessionInfo struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Additional workspace roots reported for this session. Each path must be absolute.
 	//
 	// When present, this is the complete ordered additional-root list reported
-	// by the Agent. Omitted, 'null', and empty values are equivalent: the response
+	// by the Agent. Omitted and empty values are equivalent: the response
 	// reports no additional roots.
 	AdditionalDirectories []AbsolutePath `json:"additionalDirectories,omitempty"`
 	// The working directory for this session. Must be an absolute path.
@@ -15866,18 +17105,18 @@ func (v *SessionInfo) UnmarshalJSON(b []byte) error {
 // Update to session metadata. All fields are optional to support partial updates.
 //
 // Agents send this notification to update session information like title or custom metadata.
-// This allows clients to display dynamic session names and track session state changes.
+// Clients can use it to keep session titles and state current.
 //
 // Omitted fields leave the existing session info unchanged. 'null' clears the
 // corresponding value. A concrete '_meta' object patches the stored metadata by
 // top-level key.
 type SessionInfoUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -16067,6 +17306,56 @@ func (v *SessionInfoUpdate) UnsetUpdatedAt() {
 // An opaque cursor used to paginate 'session/list' results.
 type SessionListCursor string
 
+// Data for the '-32002' (Resource not found) error when a session-scoped request names a
+// session that does not exist or is not active.
+//
+// See protocol docs: [Unknown Sessions](https://agentclientprotocol.com/protocol/v2/error#unknown-sessions)
+type SessionNotFoundErrorData struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The session ID from the request.
+	SessionId SessionId `json:"sessionId"`
+}
+
+func (v *SessionNotFoundErrorData) UnmarshalJSON(b []byte) error {
+	*v = SessionNotFoundErrorData{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["sessionId"]
+		if !ok {
+			return fmt.Errorf("sessionId is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("sessionId must not be null")
+		}
+	}
+	type Alias SessionNotFoundErrorData
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = SessionNotFoundErrorData(a)
+	return nil
+}
+
 // Different types of updates that can be sent while a session exists.
 //
 // These updates report messages, progress, and other session activity.
@@ -16076,7 +17365,7 @@ type SessionListCursor string
 type SessionUpdateUserMessageChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -16151,11 +17440,11 @@ func (v *SessionUpdateUserMessageChunk) UnmarshalJSON(b []byte) error {
 // fields in the new update patch the previous fields for that message.
 type SessionUpdateUserMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -16321,7 +17610,7 @@ func (v *SessionUpdateUserMessage) UnsetContent() {
 type SessionUpdateAgentMessageChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -16396,11 +17685,11 @@ func (v *SessionUpdateAgentMessageChunk) UnmarshalJSON(b []byte) error {
 // fields in the new update patch the previous fields for that message.
 type SessionUpdateAgentMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -16566,7 +17855,7 @@ func (v *SessionUpdateAgentMessage) UnsetContent() {
 type SessionUpdateAgentThoughtChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -16641,11 +17930,11 @@ func (v *SessionUpdateAgentThoughtChunk) UnmarshalJSON(b []byte) error {
 // fields in the new update patch the previous fields for that message.
 type SessionUpdateAgentThought struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -16867,7 +18156,7 @@ func (v *SessionStateUpdate) UnmarshalJSON(b []byte) error {
 type SessionUpdateToolCallContentChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -16935,14 +18224,19 @@ func (v *SessionUpdateToolCallContentChunk) UnmarshalJSON(b []byte) error {
 // A tool call has been created or updated.
 type SessionToolCallUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Client-initiated controls this tool call currently supports, such as cancellation.
+	//
+	// Omission leaves the capabilities unchanged, 'null' clears them, and an object replaces
+	// the whole previous value. A new tool call starts with none.
+	Capabilities *ToolCallCapabilities `json:"capabilities,omitempty"`
 	// Content produced by the tool call.
 	Content []ToolCallContent `json:"content,omitempty"`
 	// The category of tool being invoked.
@@ -16977,14 +18271,15 @@ type SessionToolCallUpdate struct {
 	// A new tool call starts without a title.
 	Title *string `json:"title,omitempty"`
 	// Unique identifier for this tool call within the session.
-	ToolCallId   ToolCallId `json:"toolCallId"`
-	hasMeta      bool       `json:"-"`
-	hasContent   bool       `json:"-"`
-	hasKind      bool       `json:"-"`
-	hasLocations bool       `json:"-"`
-	hasName      bool       `json:"-"`
-	hasStatus    bool       `json:"-"`
-	hasTitle     bool       `json:"-"`
+	ToolCallId      ToolCallId `json:"toolCallId"`
+	hasMeta         bool       `json:"-"`
+	hasCapabilities bool       `json:"-"`
+	hasContent      bool       `json:"-"`
+	hasKind         bool       `json:"-"`
+	hasLocations    bool       `json:"-"`
+	hasName         bool       `json:"-"`
+	hasStatus       bool       `json:"-"`
+	hasTitle        bool       `json:"-"`
 }
 
 func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
@@ -16999,6 +18294,16 @@ func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 		__metaJSON = encoded
 	} else if a.hasMeta {
 		__metaJSON = json.RawMessage("null")
+	}
+	var _capabilitiesJSON json.RawMessage
+	if a.Capabilities != nil {
+		encoded, err := json.Marshal(*a.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		_capabilitiesJSON = encoded
+	} else if a.hasCapabilities {
+		_capabilitiesJSON = json.RawMessage("null")
 	}
 	var _contentJSON json.RawMessage
 	if a.Content != nil {
@@ -17062,22 +18367,24 @@ func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		Alias
-		Meta      json.RawMessage `json:"_meta,omitempty"`
-		Content   json.RawMessage `json:"content,omitempty"`
-		Kind      json.RawMessage `json:"kind,omitempty"`
-		Locations json.RawMessage `json:"locations,omitempty"`
-		Name      json.RawMessage `json:"name,omitempty"`
-		Status    json.RawMessage `json:"status,omitempty"`
-		Title     json.RawMessage `json:"title,omitempty"`
+		Meta         json.RawMessage `json:"_meta,omitempty"`
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+		Content      json.RawMessage `json:"content,omitempty"`
+		Kind         json.RawMessage `json:"kind,omitempty"`
+		Locations    json.RawMessage `json:"locations,omitempty"`
+		Name         json.RawMessage `json:"name,omitempty"`
+		Status       json.RawMessage `json:"status,omitempty"`
+		Title        json.RawMessage `json:"title,omitempty"`
 	}{
-		Alias:     a,
-		Content:   _contentJSON,
-		Kind:      _kindJSON,
-		Locations: _locationsJSON,
-		Meta:      __metaJSON,
-		Name:      _nameJSON,
-		Status:    _statusJSON,
-		Title:     _titleJSON,
+		Alias:        a,
+		Capabilities: _capabilitiesJSON,
+		Content:      _contentJSON,
+		Kind:         _kindJSON,
+		Locations:    _locationsJSON,
+		Meta:         __metaJSON,
+		Name:         _nameJSON,
+		Status:       _statusJSON,
+		Title:        _titleJSON,
 	})
 }
 
@@ -17109,15 +18416,16 @@ func (v *SessionToolCallUpdate) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta      json.RawMessage `json:"_meta"`
-		Content   json.RawMessage `json:"content"`
-		Kind      json.RawMessage `json:"kind"`
-		Locations json.RawMessage `json:"locations"`
-		Name      json.RawMessage `json:"name"`
-		RawInput  json.RawMessage `json:"rawInput"`
-		RawOutput json.RawMessage `json:"rawOutput"`
-		Status    json.RawMessage `json:"status"`
-		Title     json.RawMessage `json:"title"`
+		Meta         json.RawMessage `json:"_meta"`
+		Capabilities json.RawMessage `json:"capabilities"`
+		Content      json.RawMessage `json:"content"`
+		Kind         json.RawMessage `json:"kind"`
+		Locations    json.RawMessage `json:"locations"`
+		Name         json.RawMessage `json:"name"`
+		RawInput     json.RawMessage `json:"rawInput"`
+		RawOutput    json.RawMessage `json:"rawOutput"`
+		Status       json.RawMessage `json:"status"`
+		Title        json.RawMessage `json:"title"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -17127,6 +18435,12 @@ func (v *SessionToolCallUpdate) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value *ToolCallCapabilities
+		if json.Unmarshal(raw.Capabilities, &value) == nil {
+			a.Capabilities = value
 		}
 	}
 	{
@@ -17194,6 +18508,10 @@ func (v *SessionToolCallUpdate) UnmarshalJSON(b []byte) error {
 		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
+		raw, present := m["capabilities"]
+		a.hasCapabilities = present && (a.Capabilities != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
 		raw, present := m["content"]
 		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
@@ -17244,6 +18562,31 @@ func (v *SessionToolCallUpdate) ClearMeta() {
 func (v *SessionToolCallUpdate) UnsetMeta() {
 	v.Meta = nil
 	v.hasMeta = false
+}
+
+func (v SessionToolCallUpdate) CapabilitiesState() NullableFieldState {
+	if v.Capabilities != nil {
+		return NullableFieldValue
+	}
+	if v.hasCapabilities {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetCapabilities(value ToolCallCapabilities) {
+	v.Capabilities = &value
+	v.hasCapabilities = true
+}
+
+func (v *SessionToolCallUpdate) ClearCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = true
+}
+
+func (v *SessionToolCallUpdate) UnsetCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = false
 }
 
 func (v SessionToolCallUpdate) ContentState() NullableFieldState {
@@ -17399,14 +18742,19 @@ func (v *SessionToolCallUpdate) UnsetTitle() {
 // An agent-owned terminal has been created or updated.
 type SessionTerminalUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Client-initiated controls this terminal currently supports, such as cancellation.
+	//
+	// Omission leaves the capabilities unchanged, 'null' clears them, and an object replaces
+	// the whole previous value. A new terminal starts with none.
+	Capabilities *TerminalCapabilities `json:"capabilities,omitempty"`
 	// The command being run.
 	Command *string `json:"command,omitempty"`
 	// The absolute working directory of the command.
@@ -17422,13 +18770,14 @@ type SessionTerminalUpdate struct {
 	// and cursor-positioned output display as the program wrote them.
 	Size *TerminalSize `json:"size,omitempty"`
 	// Unique identifier for this terminal within the session.
-	TerminalId    TerminalId `json:"terminalId"`
-	hasMeta       bool       `json:"-"`
-	hasCommand    bool       `json:"-"`
-	hasCwd        bool       `json:"-"`
-	hasExitStatus bool       `json:"-"`
-	hasOutput     bool       `json:"-"`
-	hasSize       bool       `json:"-"`
+	TerminalId      TerminalId `json:"terminalId"`
+	hasMeta         bool       `json:"-"`
+	hasCapabilities bool       `json:"-"`
+	hasCommand      bool       `json:"-"`
+	hasCwd          bool       `json:"-"`
+	hasExitStatus   bool       `json:"-"`
+	hasOutput       bool       `json:"-"`
+	hasSize         bool       `json:"-"`
 }
 
 func (v SessionTerminalUpdate) MarshalJSON() ([]byte, error) {
@@ -17443,6 +18792,16 @@ func (v SessionTerminalUpdate) MarshalJSON() ([]byte, error) {
 		__metaJSON = encoded
 	} else if a.hasMeta {
 		__metaJSON = json.RawMessage("null")
+	}
+	var _capabilitiesJSON json.RawMessage
+	if a.Capabilities != nil {
+		encoded, err := json.Marshal(*a.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		_capabilitiesJSON = encoded
+	} else if a.hasCapabilities {
+		_capabilitiesJSON = json.RawMessage("null")
 	}
 	var _commandJSON json.RawMessage
 	if a.Command != nil {
@@ -17496,20 +18855,22 @@ func (v SessionTerminalUpdate) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		Alias
-		Meta       json.RawMessage `json:"_meta,omitempty"`
-		Command    json.RawMessage `json:"command,omitempty"`
-		Cwd        json.RawMessage `json:"cwd,omitempty"`
-		ExitStatus json.RawMessage `json:"exitStatus,omitempty"`
-		Output     json.RawMessage `json:"output,omitempty"`
-		Size       json.RawMessage `json:"size,omitempty"`
+		Meta         json.RawMessage `json:"_meta,omitempty"`
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+		Command      json.RawMessage `json:"command,omitempty"`
+		Cwd          json.RawMessage `json:"cwd,omitempty"`
+		ExitStatus   json.RawMessage `json:"exitStatus,omitempty"`
+		Output       json.RawMessage `json:"output,omitempty"`
+		Size         json.RawMessage `json:"size,omitempty"`
 	}{
-		Alias:      a,
-		Command:    _commandJSON,
-		Cwd:        _cwdJSON,
-		ExitStatus: _exitStatusJSON,
-		Meta:       __metaJSON,
-		Output:     _outputJSON,
-		Size:       _sizeJSON,
+		Alias:        a,
+		Capabilities: _capabilitiesJSON,
+		Command:      _commandJSON,
+		Cwd:          _cwdJSON,
+		ExitStatus:   _exitStatusJSON,
+		Meta:         __metaJSON,
+		Output:       _outputJSON,
+		Size:         _sizeJSON,
 	})
 }
 
@@ -17541,12 +18902,13 @@ func (v *SessionTerminalUpdate) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta       json.RawMessage `json:"_meta"`
-		Command    json.RawMessage `json:"command"`
-		Cwd        json.RawMessage `json:"cwd"`
-		ExitStatus json.RawMessage `json:"exitStatus"`
-		Output     json.RawMessage `json:"output"`
-		Size       json.RawMessage `json:"size"`
+		Meta         json.RawMessage `json:"_meta"`
+		Capabilities json.RawMessage `json:"capabilities"`
+		Command      json.RawMessage `json:"command"`
+		Cwd          json.RawMessage `json:"cwd"`
+		ExitStatus   json.RawMessage `json:"exitStatus"`
+		Output       json.RawMessage `json:"output"`
+		Size         json.RawMessage `json:"size"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -17556,6 +18918,12 @@ func (v *SessionTerminalUpdate) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value *TerminalCapabilities
+		if json.Unmarshal(raw.Capabilities, &value) == nil {
+			a.Capabilities = value
 		}
 	}
 	{
@@ -17591,6 +18959,10 @@ func (v *SessionTerminalUpdate) UnmarshalJSON(b []byte) error {
 	{
 		raw, present := m["_meta"]
 		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["capabilities"]
+		a.hasCapabilities = present && (a.Capabilities != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
 		raw, present := m["command"]
@@ -17639,6 +19011,31 @@ func (v *SessionTerminalUpdate) ClearMeta() {
 func (v *SessionTerminalUpdate) UnsetMeta() {
 	v.Meta = nil
 	v.hasMeta = false
+}
+
+func (v SessionTerminalUpdate) CapabilitiesState() NullableFieldState {
+	if v.Capabilities != nil {
+		return NullableFieldValue
+	}
+	if v.hasCapabilities {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionTerminalUpdate) SetCapabilities(value TerminalCapabilities) {
+	v.Capabilities = &value
+	v.hasCapabilities = true
+}
+
+func (v *SessionTerminalUpdate) ClearCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = true
+}
+
+func (v *SessionTerminalUpdate) UnsetCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = false
 }
 
 func (v SessionTerminalUpdate) CommandState() NullableFieldState {
@@ -17770,7 +19167,7 @@ func (v *SessionTerminalUpdate) UnsetSize() {
 type SessionUpdateTerminalOutputChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -17840,7 +19237,7 @@ func (v *SessionUpdateTerminalOutputChunk) UnmarshalJSON(b []byte) error {
 type SessionPlanUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -17897,7 +19294,7 @@ func (v *SessionPlanUpdate) UnmarshalJSON(b []byte) error {
 type SessionAvailableCommandsUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -17973,7 +19370,7 @@ func (v *SessionAvailableCommandsUpdate) UnmarshalJSON(b []byte) error {
 type SessionConfigOptionUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -18048,11 +19445,11 @@ func (v *SessionConfigOptionUpdate) UnmarshalJSON(b []byte) error {
 // Session metadata has been updated (title, timestamps, custom metadata)
 type SessionSessionInfoUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta          map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -18252,19 +19649,42 @@ func (v *SessionSessionInfoUpdate) UnsetUpdatedAt() {
 type SessionUsageUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Cumulative session cost (optional).
+	// Cumulative session cost.
 	//
-	// Omitted and 'null' are equivalent and mean no cost is reported.
+	// Omitted leaves the last reported cost unchanged. 'null' clears it. A value replaces it.
 	Cost          *Cost  `json:"cost,omitempty"`
 	SessionUpdate string `json:"sessionUpdate"`
 	// Total context window size in tokens.
 	Size uint64 `json:"size"`
 	// Tokens currently in context.
-	Used uint64 `json:"used"`
+	Used    uint64 `json:"used"`
+	hasCost bool   `json:"-"`
+}
+
+func (v SessionUsageUpdate) MarshalJSON() ([]byte, error) {
+	type Alias SessionUsageUpdate
+	a := Alias(v)
+	var _costJSON json.RawMessage
+	if a.Cost != nil {
+		encoded, err := json.Marshal(*a.Cost)
+		if err != nil {
+			return nil, err
+		}
+		_costJSON = encoded
+	} else if a.hasCost {
+		_costJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Cost json.RawMessage `json:"cost,omitempty"`
+	}{
+		Alias: a,
+		Cost:  _costJSON,
+	})
 }
 
 func (v *SessionUsageUpdate) UnmarshalJSON(b []byte) error {
@@ -18323,8 +19743,37 @@ func (v *SessionUsageUpdate) UnmarshalJSON(b []byte) error {
 			a.Cost = value
 		}
 	}
+	{
+		raw, present := m["cost"]
+		a.hasCost = present && (a.Cost != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
 	*v = SessionUsageUpdate(a)
 	return nil
+}
+
+func (v SessionUsageUpdate) CostState() NullableFieldState {
+	if v.Cost != nil {
+		return NullableFieldValue
+	}
+	if v.hasCost {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionUsageUpdate) SetCost(value Cost) {
+	v.Cost = &value
+	v.hasCost = true
+}
+
+func (v *SessionUsageUpdate) ClearCost() {
+	v.Cost = nil
+	v.hasCost = true
+}
+
+func (v *SessionUsageUpdate) UnsetCost() {
+	v.Cost = nil
+	v.hasCost = false
 }
 
 // Information for the user that is not part of session history.
@@ -18334,7 +19783,7 @@ func (v *SessionUsageUpdate) UnmarshalJSON(b []byte) error {
 type SessionUpdateNotice struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -18420,11 +19869,11 @@ func (v *SessionUpdateNotice) UnmarshalJSON(b []byte) error {
 // A context compaction has been created or updated.
 type SessionCompactionUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -18652,7 +20101,7 @@ func (v *SessionCompactionUpdate) UnsetSummary() {
 type SessionUpdateCompactionSummaryChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -19978,7 +21427,7 @@ func (u *SessionUpdate) Validate() error {
 type SetSessionConfigOptionId struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -20039,7 +21488,7 @@ func (v *SetSessionConfigOptionId) UnmarshalJSON(b []byte) error {
 type SetSessionConfigOptionBoolean struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -20400,7 +21849,7 @@ func (u *SetSessionConfigOptionRequest) Validate() error {
 type SetSessionConfigOptionResponse struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -20518,11 +21967,20 @@ func (v *SetSessionConfigOptionResponse) Validate() error {
 type StateUpdateRunning struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta  map[string]json.RawMessage `json:"_meta,omitempty"`
-	State string                     `json:"state"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	State      string           `json:"state"`
 }
 
 func (v *StateUpdateRunning) UnmarshalJSON(b []byte) error {
@@ -20544,7 +22002,8 @@ func (v *StateUpdateRunning) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -20554,6 +22013,12 @@ func (v *StateUpdateRunning) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
 		}
 	}
 	*v = StateUpdateRunning(a)
@@ -20620,11 +22085,20 @@ func (v *StateUpdateIdle) UnmarshalJSON(b []byte) error {
 type StateUpdateRequiresAction struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-	Meta  map[string]json.RawMessage `json:"_meta,omitempty"`
-	State string                     `json:"state"`
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Work running independently of foreground work, as a complete snapshot.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent is not reporting
+	// background work, not that nothing is running. '[]' means no background work is
+	// running. An Agent that reports background work MUST include it on every state
+	// update for the session. A malformed list is treated as not reported.
+	//
+	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+	Background []BackgroundWork `json:"background,omitempty"`
+	State      string           `json:"state"`
 }
 
 func (v *StateUpdateRequiresAction) UnmarshalJSON(b []byte) error {
@@ -20646,7 +22120,8 @@ func (v *StateUpdateRequiresAction) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta json.RawMessage `json:"_meta"`
+		Meta       json.RawMessage `json:"_meta"`
+		Background json.RawMessage `json:"background"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -20656,6 +22131,12 @@ func (v *StateUpdateRequiresAction) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value []BackgroundWork
+		if json.Unmarshal(raw.Background, &value) == nil {
+			a.Background = value
 		}
 	}
 	*v = StateUpdateRequiresAction(a)
@@ -21032,7 +22513,7 @@ const (
 type StringMultiSelectItems struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21053,6 +22534,12 @@ func (v *StringMultiSelectItems) UnmarshalJSON(b []byte) error {
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return fmt.Errorf("enum must not be null")
+		}
+	}
+	if raw, ok := m["enum"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("enum requires at least %d items", 1)
 		}
 	}
 	type Alias StringMultiSelectItems
@@ -21082,7 +22569,7 @@ func (v *StringMultiSelectItems) UnmarshalJSON(b []byte) error {
 type StringPropertySchema struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21132,6 +22619,18 @@ func (v *StringPropertySchema) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return err
 	}
+	if raw, ok := m["enum"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("enum requires at least %d items", 1)
+		}
+	}
+	if raw, ok := m["oneOf"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("oneOf requires at least %d items", 1)
+		}
+	}
 	type Alias StringPropertySchema
 	var a Alias
 	var raw struct {
@@ -21180,7 +22679,7 @@ func (v *StringPropertySchema) UnmarshalJSON(b []byte) error {
 type Terminal struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21231,7 +22730,7 @@ func (v *Terminal) UnmarshalJSON(b []byte) error {
 type TerminalAuthCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21263,6 +22762,97 @@ func (v *TerminalAuthCapabilities) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// Capability to cancel a terminal with 'terminal/cancel'.
+//
+// Supplying '{}' advertises support. An omitted or 'null' 'cancel' does not.
+type TerminalCancelCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+func (v *TerminalCancelCapabilities) UnmarshalJSON(b []byte) error {
+	*v = TerminalCancelCapabilities{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias TerminalCancelCapabilities
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = TerminalCancelCapabilities(a)
+	return nil
+}
+
+// Client-initiated controls a terminal currently supports.
+//
+// A malformed value falls back to no controls, so the Client never sends a request the
+// Agent did not advertise.
+//
+// See protocol docs: [Cancelling Terminals](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-terminals)
+type TerminalCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Permits the Client to cancel this terminal with 'terminal/cancel'.
+	//
+	// Omitted and 'null' are equivalent and mean unsupported. An object (including '{}')
+	// means supported. Agents SHOULD stop advertising it once the terminal reports 'exitStatus'.
+	Cancel *TerminalCancelCapabilities `json:"cancel,omitempty"`
+}
+
+func (v *TerminalCapabilities) UnmarshalJSON(b []byte) error {
+	*v = TerminalCapabilities{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias TerminalCapabilities
+	var a Alias
+	var raw struct {
+		Alias
+		Meta   json.RawMessage `json:"_meta"`
+		Cancel json.RawMessage `json:"cancel"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *TerminalCancelCapabilities
+		if json.Unmarshal(raw.Cancel, &value) == nil {
+			a.Cancel = value
+		}
+	}
+	*v = TerminalCapabilities(a)
+	return nil
+}
+
 // Exit information for an agent-owned terminal.
 //
 // The presence of this object marks the terminal as exited, even when neither
@@ -21270,7 +22860,7 @@ func (v *TerminalAuthCapabilities) UnmarshalJSON(b []byte) error {
 type TerminalExitStatus struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21332,7 +22922,7 @@ type TerminalId string
 type TerminalOutput struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21379,7 +22969,7 @@ func (v *TerminalOutput) UnmarshalJSON(b []byte) error {
 type TerminalOutputChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -21438,7 +23028,7 @@ func (v *TerminalOutputChunk) UnmarshalJSON(b []byte) error {
 type TerminalSize struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21517,14 +23107,19 @@ func (v *TerminalSize) UnmarshalJSON(b []byte) error {
 // omitted fields start unknown.
 type TerminalUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Client-initiated controls this terminal currently supports, such as cancellation.
+	//
+	// Omission leaves the capabilities unchanged, 'null' clears them, and an object replaces
+	// the whole previous value. A new terminal starts with none.
+	Capabilities *TerminalCapabilities `json:"capabilities,omitempty"`
 	// The command being run.
 	Command *string `json:"command,omitempty"`
 	// The absolute working directory of the command.
@@ -21539,13 +23134,14 @@ type TerminalUpdate struct {
 	// and cursor-positioned output display as the program wrote them.
 	Size *TerminalSize `json:"size,omitempty"`
 	// Unique identifier for this terminal within the session.
-	TerminalId    TerminalId `json:"terminalId"`
-	hasMeta       bool       `json:"-"`
-	hasCommand    bool       `json:"-"`
-	hasCwd        bool       `json:"-"`
-	hasExitStatus bool       `json:"-"`
-	hasOutput     bool       `json:"-"`
-	hasSize       bool       `json:"-"`
+	TerminalId      TerminalId `json:"terminalId"`
+	hasMeta         bool       `json:"-"`
+	hasCapabilities bool       `json:"-"`
+	hasCommand      bool       `json:"-"`
+	hasCwd          bool       `json:"-"`
+	hasExitStatus   bool       `json:"-"`
+	hasOutput       bool       `json:"-"`
+	hasSize         bool       `json:"-"`
 }
 
 func (v TerminalUpdate) MarshalJSON() ([]byte, error) {
@@ -21561,6 +23157,16 @@ func (v TerminalUpdate) MarshalJSON() ([]byte, error) {
 		__metaJSON = encoded
 	} else if a.hasMeta {
 		__metaJSON = json.RawMessage("null")
+	}
+	var _capabilitiesJSON json.RawMessage
+	if a.Capabilities != nil {
+		encoded, err := json.Marshal(*a.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		_capabilitiesJSON = encoded
+	} else if a.hasCapabilities {
+		_capabilitiesJSON = json.RawMessage("null")
 	}
 	var _commandJSON json.RawMessage
 	if a.Command != nil {
@@ -21614,20 +23220,22 @@ func (v TerminalUpdate) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		Alias
-		Meta       json.RawMessage `json:"_meta,omitempty"`
-		Command    json.RawMessage `json:"command,omitempty"`
-		Cwd        json.RawMessage `json:"cwd,omitempty"`
-		ExitStatus json.RawMessage `json:"exitStatus,omitempty"`
-		Output     json.RawMessage `json:"output,omitempty"`
-		Size       json.RawMessage `json:"size,omitempty"`
+		Meta         json.RawMessage `json:"_meta,omitempty"`
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+		Command      json.RawMessage `json:"command,omitempty"`
+		Cwd          json.RawMessage `json:"cwd,omitempty"`
+		ExitStatus   json.RawMessage `json:"exitStatus,omitempty"`
+		Output       json.RawMessage `json:"output,omitempty"`
+		Size         json.RawMessage `json:"size,omitempty"`
 	}{
-		Alias:      a,
-		Command:    _commandJSON,
-		Cwd:        _cwdJSON,
-		ExitStatus: _exitStatusJSON,
-		Meta:       __metaJSON,
-		Output:     _outputJSON,
-		Size:       _sizeJSON,
+		Alias:        a,
+		Capabilities: _capabilitiesJSON,
+		Command:      _commandJSON,
+		Cwd:          _cwdJSON,
+		ExitStatus:   _exitStatusJSON,
+		Meta:         __metaJSON,
+		Output:       _outputJSON,
+		Size:         _sizeJSON,
 	})
 }
 
@@ -21650,12 +23258,13 @@ func (v *TerminalUpdate) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta       json.RawMessage `json:"_meta"`
-		Command    json.RawMessage `json:"command"`
-		Cwd        json.RawMessage `json:"cwd"`
-		ExitStatus json.RawMessage `json:"exitStatus"`
-		Output     json.RawMessage `json:"output"`
-		Size       json.RawMessage `json:"size"`
+		Meta         json.RawMessage `json:"_meta"`
+		Capabilities json.RawMessage `json:"capabilities"`
+		Command      json.RawMessage `json:"command"`
+		Cwd          json.RawMessage `json:"cwd"`
+		ExitStatus   json.RawMessage `json:"exitStatus"`
+		Output       json.RawMessage `json:"output"`
+		Size         json.RawMessage `json:"size"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -21665,6 +23274,12 @@ func (v *TerminalUpdate) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value *TerminalCapabilities
+		if json.Unmarshal(raw.Capabilities, &value) == nil {
+			a.Capabilities = value
 		}
 	}
 	{
@@ -21700,6 +23315,10 @@ func (v *TerminalUpdate) UnmarshalJSON(b []byte) error {
 	{
 		raw, present := m["_meta"]
 		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["capabilities"]
+		a.hasCapabilities = present && (a.Capabilities != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
 		raw, present := m["command"]
@@ -21748,6 +23367,31 @@ func (v *TerminalUpdate) ClearMeta() {
 func (v *TerminalUpdate) UnsetMeta() {
 	v.Meta = nil
 	v.hasMeta = false
+}
+
+func (v TerminalUpdate) CapabilitiesState() NullableFieldState {
+	if v.Capabilities != nil {
+		return NullableFieldValue
+	}
+	if v.hasCapabilities {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *TerminalUpdate) SetCapabilities(value TerminalCapabilities) {
+	v.Capabilities = &value
+	v.hasCapabilities = true
+}
+
+func (v *TerminalUpdate) ClearCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = true
+}
+
+func (v *TerminalUpdate) UnsetCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = false
 }
 
 func (v TerminalUpdate) CommandState() NullableFieldState {
@@ -21879,7 +23523,7 @@ func (v *TerminalUpdate) UnsetSize() {
 type TextCommandInput struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21926,7 +23570,7 @@ func (v *TextCommandInput) UnmarshalJSON(b []byte) error {
 type TextContent struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -21984,7 +23628,7 @@ func (v *TextContent) UnmarshalJSON(b []byte) error {
 type TextResourceContents struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -22053,7 +23697,7 @@ func (v *TextResourceContents) UnmarshalJSON(b []byte) error {
 type TitledMultiSelectItems struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -22076,6 +23720,12 @@ func (v *TitledMultiSelectItems) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("anyOf must not be null")
 		}
 	}
+	if raw, ok := m["anyOf"]; ok {
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) != nil || len(items) < 1 {
+			return fmt.Errorf("anyOf requires at least %d items", 1)
+		}
+	}
 	type Alias TitledMultiSelectItems
 	var a Alias
 	var raw struct {
@@ -22096,6 +23746,97 @@ func (v *TitledMultiSelectItems) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// Capability to cancel a tool call with 'tool_call/cancel'.
+//
+// Supplying '{}' advertises support. An omitted or 'null' 'cancel' does not.
+type ToolCallCancelCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+func (v *ToolCallCancelCapabilities) UnmarshalJSON(b []byte) error {
+	*v = ToolCallCancelCapabilities{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias ToolCallCancelCapabilities
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = ToolCallCancelCapabilities(a)
+	return nil
+}
+
+// Client-initiated controls a tool call currently supports.
+//
+// A malformed value falls back to no controls, so the Client never sends a request the
+// Agent did not advertise.
+//
+// See protocol docs: [Cancelling Tool Calls](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-tool-calls)
+type ToolCallCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Permits the Client to cancel this tool call with 'tool_call/cancel'.
+	//
+	// Omitted and 'null' are equivalent and mean unsupported. An object (including '{}')
+	// means supported. Agents SHOULD stop advertising it once the tool call reaches a final status.
+	Cancel *ToolCallCancelCapabilities `json:"cancel,omitempty"`
+}
+
+func (v *ToolCallCapabilities) UnmarshalJSON(b []byte) error {
+	*v = ToolCallCapabilities{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	type Alias ToolCallCapabilities
+	var a Alias
+	var raw struct {
+		Alias
+		Meta   json.RawMessage `json:"_meta"`
+		Cancel json.RawMessage `json:"cancel"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	{
+		var value *ToolCallCancelCapabilities
+		if json.Unmarshal(raw.Cancel, &value) == nil {
+			a.Cancel = value
+		}
+	}
+	*v = ToolCallCapabilities(a)
+	return nil
+}
+
 // Content produced by a tool call.
 //
 // Tool calls can produce different types of content including standard
@@ -22106,7 +23847,7 @@ func (v *TitledMultiSelectItems) UnmarshalJSON(b []byte) error {
 type ToolCallContentContent struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -22163,7 +23904,7 @@ func (v *ToolCallContentContent) UnmarshalJSON(b []byte) error {
 type ToolCallContentDiff struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -22253,7 +23994,7 @@ func (v *ToolCallContentDiff) UnmarshalJSON(b []byte) error {
 type ToolCallContentTerminal struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -22570,7 +24311,7 @@ func (u *ToolCallContent) Validate() error {
 type ToolCallContentChunk struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	// This metadata is scoped to the chunk and does not patch stored metadata.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
@@ -22637,12 +24378,12 @@ type ToolCallId string
 type ToolCallLocation struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Optional 1-based line number within the file. Omitted and 'null' are equivalent and
-	// mean no specific line; '0' is invalid.
+	// mean no specific line. '0' is invalid.
 	Line *uint32 `json:"line,omitempty"`
 	// The absolute file path being accessed or modified.
 	Path AbsolutePath `json:"path"`
@@ -22694,7 +24435,7 @@ func (v *ToolCallLocation) UnmarshalJSON(b []byte) error {
 type ToolCallPermissionSubject struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -22751,6 +24492,7 @@ type ToolCallStatus string
 const (
 	ToolCallStatusPending    ToolCallStatus = "pending"
 	ToolCallStatusInProgress ToolCallStatus = "in_progress"
+	ToolCallStatusPaused     ToolCallStatus = "paused"
 	ToolCallStatusCompleted  ToolCallStatus = "completed"
 	ToolCallStatusFailed     ToolCallStatus = "failed"
 	ToolCallStatusCancelled  ToolCallStatus = "cancelled"
@@ -22767,19 +24509,24 @@ const (
 // collection fields, concrete arrays replace the previous collection, and both
 // 'null' and '[]' clear the collection. A concrete '_meta' object instead
 // patches the stored metadata by top-level key. When a client receives a tool
-// call ID it has not seen before, omitted fields use client defaults.
+// call ID it has not seen before, omitted fields start at their protocol defaults.
 //
 // See protocol docs: [Tool Calls](https://agentclientprotocol.com/protocol/v2/tool-calls)
 type ToolCallUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Client-initiated controls this tool call currently supports, such as cancellation.
+	//
+	// Omission leaves the capabilities unchanged, 'null' clears them, and an object replaces
+	// the whole previous value. A new tool call starts with none.
+	Capabilities *ToolCallCapabilities `json:"capabilities,omitempty"`
 	// Content produced by the tool call.
 	Content []ToolCallContent `json:"content,omitempty"`
 	// The category of tool being invoked.
@@ -22813,14 +24560,15 @@ type ToolCallUpdate struct {
 	// A new tool call starts without a title.
 	Title *string `json:"title,omitempty"`
 	// Unique identifier for this tool call within the session.
-	ToolCallId   ToolCallId `json:"toolCallId"`
-	hasMeta      bool       `json:"-"`
-	hasContent   bool       `json:"-"`
-	hasKind      bool       `json:"-"`
-	hasLocations bool       `json:"-"`
-	hasName      bool       `json:"-"`
-	hasStatus    bool       `json:"-"`
-	hasTitle     bool       `json:"-"`
+	ToolCallId      ToolCallId `json:"toolCallId"`
+	hasMeta         bool       `json:"-"`
+	hasCapabilities bool       `json:"-"`
+	hasContent      bool       `json:"-"`
+	hasKind         bool       `json:"-"`
+	hasLocations    bool       `json:"-"`
+	hasName         bool       `json:"-"`
+	hasStatus       bool       `json:"-"`
+	hasTitle        bool       `json:"-"`
 }
 
 func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
@@ -22836,6 +24584,16 @@ func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 		__metaJSON = encoded
 	} else if a.hasMeta {
 		__metaJSON = json.RawMessage("null")
+	}
+	var _capabilitiesJSON json.RawMessage
+	if a.Capabilities != nil {
+		encoded, err := json.Marshal(*a.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		_capabilitiesJSON = encoded
+	} else if a.hasCapabilities {
+		_capabilitiesJSON = json.RawMessage("null")
 	}
 	var _contentJSON json.RawMessage
 	if a.Content != nil {
@@ -22899,22 +24657,24 @@ func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		Alias
-		Meta      json.RawMessage `json:"_meta,omitempty"`
-		Content   json.RawMessage `json:"content,omitempty"`
-		Kind      json.RawMessage `json:"kind,omitempty"`
-		Locations json.RawMessage `json:"locations,omitempty"`
-		Name      json.RawMessage `json:"name,omitempty"`
-		Status    json.RawMessage `json:"status,omitempty"`
-		Title     json.RawMessage `json:"title,omitempty"`
+		Meta         json.RawMessage `json:"_meta,omitempty"`
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+		Content      json.RawMessage `json:"content,omitempty"`
+		Kind         json.RawMessage `json:"kind,omitempty"`
+		Locations    json.RawMessage `json:"locations,omitempty"`
+		Name         json.RawMessage `json:"name,omitempty"`
+		Status       json.RawMessage `json:"status,omitempty"`
+		Title        json.RawMessage `json:"title,omitempty"`
 	}{
-		Alias:     a,
-		Content:   _contentJSON,
-		Kind:      _kindJSON,
-		Locations: _locationsJSON,
-		Meta:      __metaJSON,
-		Name:      _nameJSON,
-		Status:    _statusJSON,
-		Title:     _titleJSON,
+		Alias:        a,
+		Capabilities: _capabilitiesJSON,
+		Content:      _contentJSON,
+		Kind:         _kindJSON,
+		Locations:    _locationsJSON,
+		Meta:         __metaJSON,
+		Name:         _nameJSON,
+		Status:       _statusJSON,
+		Title:        _titleJSON,
 	})
 }
 
@@ -22937,15 +24697,16 @@ func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
 	var a Alias
 	var raw struct {
 		Alias
-		Meta      json.RawMessage `json:"_meta"`
-		Content   json.RawMessage `json:"content"`
-		Kind      json.RawMessage `json:"kind"`
-		Locations json.RawMessage `json:"locations"`
-		Name      json.RawMessage `json:"name"`
-		RawInput  json.RawMessage `json:"rawInput"`
-		RawOutput json.RawMessage `json:"rawOutput"`
-		Status    json.RawMessage `json:"status"`
-		Title     json.RawMessage `json:"title"`
+		Meta         json.RawMessage `json:"_meta"`
+		Capabilities json.RawMessage `json:"capabilities"`
+		Content      json.RawMessage `json:"content"`
+		Kind         json.RawMessage `json:"kind"`
+		Locations    json.RawMessage `json:"locations"`
+		Name         json.RawMessage `json:"name"`
+		RawInput     json.RawMessage `json:"rawInput"`
+		RawOutput    json.RawMessage `json:"rawOutput"`
+		Status       json.RawMessage `json:"status"`
+		Title        json.RawMessage `json:"title"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -22955,6 +24716,12 @@ func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
 		var value map[string]json.RawMessage
 		if json.Unmarshal(raw.Meta, &value) == nil {
 			a.Meta = value
+		}
+	}
+	{
+		var value *ToolCallCapabilities
+		if json.Unmarshal(raw.Capabilities, &value) == nil {
+			a.Capabilities = value
 		}
 	}
 	{
@@ -23022,6 +24789,10 @@ func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
 		a.hasMeta = present && (a.Meta != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
+		raw, present := m["capabilities"]
+		a.hasCapabilities = present && (a.Capabilities != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
 		raw, present := m["content"]
 		a.hasContent = present && (a.Content != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
@@ -23072,6 +24843,31 @@ func (v *ToolCallUpdate) ClearMeta() {
 func (v *ToolCallUpdate) UnsetMeta() {
 	v.Meta = nil
 	v.hasMeta = false
+}
+
+func (v ToolCallUpdate) CapabilitiesState() NullableFieldState {
+	if v.Capabilities != nil {
+		return NullableFieldValue
+	}
+	if v.hasCapabilities {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetCapabilities(value ToolCallCapabilities) {
+	v.Capabilities = &value
+	v.hasCapabilities = true
+}
+
+func (v *ToolCallUpdate) ClearCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = true
+}
+
+func (v *ToolCallUpdate) UnsetCapabilities() {
+	v.Capabilities = nil
+	v.hasCapabilities = false
 }
 
 func (v ToolCallUpdate) ContentState() NullableFieldState {
@@ -23249,6 +25045,66 @@ const (
 	ToolKindOther      ToolKind = "other"
 )
 
+// Data for the '-32022' (Unsupported protocol version) error.
+//
+// See protocol docs: [Version Negotiation](https://agentclientprotocol.com/protocol/v2/initialization#version-negotiation)
+type UnsupportedProtocolVersionErrorData struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The protocol version the Client requested.
+	Requested ProtocolVersion `json:"requested"`
+	// The protocol versions the Agent supports.
+	Supported []ProtocolVersion `json:"supported"`
+}
+
+func (v *UnsupportedProtocolVersionErrorData) UnmarshalJSON(b []byte) error {
+	*v = UnsupportedProtocolVersionErrorData{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["requested"]
+		if !ok {
+			return fmt.Errorf("requested is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("requested must not be null")
+		}
+	}
+	{
+		raw, ok := m["supported"]
+		if !ok {
+			return fmt.Errorf("supported is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("supported must not be null")
+		}
+	}
+	type Alias UnsupportedProtocolVersionErrorData
+	var a Alias
+	var raw struct {
+		Alias
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a = raw.Alias
+	{
+		var value map[string]json.RawMessage
+		if json.Unmarshal(raw.Meta, &value) == nil {
+			a.Meta = value
+		}
+	}
+	*v = UnsupportedProtocolVersionErrorData(a)
+	return nil
+}
+
 // Notification containing a session update from the agent.
 //
 // Agents can send session updates at any point while the session exists.
@@ -23257,7 +25113,7 @@ const (
 type UpdateSessionNotification struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -23322,18 +25178,42 @@ func (v *UpdateSessionNotification) Validate() error {
 type UsageUpdate struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Omitted and 'null' are equivalent and mean no metadata.
-	// Implementations MUST NOT make assumptions about values at these keys.
+	// Implementations MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Cumulative session cost (optional).
+	// Cumulative session cost.
 	//
-	// Omitted and 'null' are equivalent and mean no cost is reported.
+	// Omitted leaves the last reported cost unchanged. 'null' clears it. A value replaces it.
 	Cost *Cost `json:"cost,omitempty"`
 	// Total context window size in tokens.
 	Size uint64 `json:"size"`
 	// Tokens currently in context.
-	Used uint64 `json:"used"`
+	Used    uint64 `json:"used"`
+	hasCost bool   `json:"-"`
+}
+
+func (v UsageUpdate) MarshalJSON() ([]byte, error) {
+	type Alias UsageUpdate
+	var a Alias
+	a = Alias(v)
+	var _costJSON json.RawMessage
+	if a.Cost != nil {
+		encoded, err := json.Marshal(*a.Cost)
+		if err != nil {
+			return nil, err
+		}
+		_costJSON = encoded
+	} else if a.hasCost {
+		_costJSON = json.RawMessage("null")
+	}
+	return json.Marshal(struct {
+		Alias
+		Cost json.RawMessage `json:"cost,omitempty"`
+	}{
+		Alias: a,
+		Cost:  _costJSON,
+	})
 }
 
 func (v *UsageUpdate) UnmarshalJSON(b []byte) error {
@@ -23383,8 +25263,37 @@ func (v *UsageUpdate) UnmarshalJSON(b []byte) error {
 			a.Cost = value
 		}
 	}
+	{
+		raw, present := m["cost"]
+		a.hasCost = present && (a.Cost != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
 	*v = UsageUpdate(a)
 	return nil
+}
+
+func (v UsageUpdate) CostState() NullableFieldState {
+	if v.Cost != nil {
+		return NullableFieldValue
+	}
+	if v.hasCost {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *UsageUpdate) SetCost(value Cost) {
+	v.Cost = &value
+	v.hasCost = true
+}
+
+func (v *UsageUpdate) ClearCost() {
+	v.Cost = nil
+	v.hasCost = true
+}
+
+func (v *UsageUpdate) UnsetCost() {
+	v.Cost = nil
+	v.hasCost = false
 }
 
 // A user message upsert.
@@ -23392,8 +25301,8 @@ func (v *UsageUpdate) UnmarshalJSON(b []byte) error {
 // Only 'messageId' is required. 'content' has patch semantics:
 // an omitted field leaves existing message content unchanged, 'null' clears the
 // value, and a concrete array replaces the previous value. For a new
-// 'messageId', omitted fields use client defaults. 'content' is replaced as a
-// whole array; send '[]' or 'null' to clear it.
+// 'messageId', omitted 'content' starts empty. 'content' is replaced as a
+// whole array. Send '[]' or 'null' to clear it.
 //
 // Message updates and chunks are applied in the order they are received. When
 // a 'user_message' update includes 'content', that array replaces any content
@@ -23402,11 +25311,11 @@ func (v *UsageUpdate) UnmarshalJSON(b []byte) error {
 // content.
 type UserMessage struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
-	// metadata to their interactions. Omitted leaves the stored metadata unchanged; 'null'
+	// metadata to their interactions. Omitted leaves the stored metadata unchanged. 'null'
 	// clears it. An object patches the stored metadata by top-level key: keys it omits are
 	// unchanged, a key set to 'null' is removed, and any other value replaces that key's
 	// stored value without merging nested objects. Beyond this patch rule, implementations
-	// MUST NOT make assumptions about values at these keys.
+	// MUST NOT assign meaning to keys they do not recognize.
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
@@ -23564,16 +25473,16 @@ type Agent interface {
 	//
 	// Specifies which authentication method to use.
 	//
-	// Agents MUST support this method when their 'initialize' response advertised
-	// at least one valid authentication method. Clients MUST NOT call this method
+	// Agents MUST support this method when their 'initialize' response included
+	// a non-empty 'authMethods' list. Clients MUST NOT call this method
 	// when 'authMethods' was omitted or empty.
 	LoginAuth(ctx context.Context, params LoginAuthRequest) (LoginAuthResponse, error)
 	// Request parameters for the 'auth/logout' method.
 	//
 	// Terminates the current authenticated session.
 	//
-	// Agents MUST support this method when their 'initialize' response advertised
-	// at least one valid authentication method. Clients MUST NOT call this method
+	// Agents MUST support this method when their 'initialize' response included
+	// a non-empty 'authMethods' list. Clients MUST NOT call this method
 	// when 'authMethods' was omitted or empty.
 	LogoutAuth(ctx context.Context, params LogoutAuthRequest) (LogoutAuthResponse, error)
 	// Request parameters for the initialize method.
@@ -23598,21 +25507,60 @@ type Agent interface {
 	Prompt(ctx context.Context, params PromptRequest) (PromptResponse, error)
 }
 
+// AgentToolCallCancel defines optional per-tool-call cancellation.
+type AgentToolCallCancel interface {
+	// Request parameters for cancelling one tool call.
+	//
+	// Clients MUST NOT send it unless the tool call currently advertises 'capabilities.cancel'.
+	//
+	// The Agent responds once it has accepted the cancellation. The response does not mean
+	// the work has stopped. The Agent confirms it with a 'tool_call_update' to a final
+	// status: normally 'cancelled', or 'completed' or 'failed' if the work finished first.
+	//
+	// The Agent responds with '-32602' if the tool call is unknown, already final, or not
+	// cancellable. Cancelling a tool call does not change the foreground state by itself.
+	//
+	// See protocol docs: [Cancelling Tool Calls](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-tool-calls)
+	CancelToolCall(ctx context.Context, params CancelToolCallRequest) (CancelToolCallResponse, error)
+}
+
+// AgentTerminalCancel defines optional per-terminal cancellation.
+type AgentTerminalCancel interface {
+	// Request parameters for cancelling one terminal.
+	//
+	// Clients MUST NOT send it unless the terminal currently advertises 'capabilities.cancel'.
+	//
+	// The Agent responds once it has accepted the cancellation. The response does not mean
+	// the work has stopped. The Agent confirms it with a 'terminal_update' that sets
+	// 'exitStatus'. Cancelling stops the process but does not release the terminal, and does
+	// not change the status of a tool call that references it.
+	//
+	// The Agent responds with '-32602' if the terminal is unknown, has already exited, or is not
+	// cancellable. Cancelling a terminal does not change the foreground state by itself.
+	//
+	// See protocol docs: [Cancelling Terminals](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-terminals)
+	CancelTerminal(ctx context.Context, params CancelTerminalRequest) (CancelTerminalResponse, error)
+}
+
 // AgentSessionCloser defines optional session close support.
 type AgentSessionCloser interface {
 	// Request parameters for closing an active session.
 	//
-	// The agent **must** cancel any ongoing work related to the session (treat it
-	// as if 'session/cancel' was called) and then free up any resources associated
-	// with the session.
+	// The Agent MUST cancel any ongoing work related to the session as if 'session/cancel'
+	// was called, then free the resources associated with the session. Unlike 'session/cancel',
+	// closing also stops the session's background work. After the close response, the Agent
+	// sends no other messages for the session on that connection.
+	//
+	// Closing a session that does not exist or is not active SHOULD succeed, and Clients SHOULD
+	// treat a '-32002' response as a successful close.
 	//
 	// When closing cancels active foreground work, the Agent MUST send the final
 	// updates for that work and the idle 'state_update' with 'stopReason: "cancelled"'
 	// before responding successfully to 'session/close'. Closing an idle session
 	// does not itself require another idle update.
 	//
-	// Closing may also cancel pending 'session/prompt' requests, including queued
-	// prompts. If closing prevents a prompt's user message from being inserted, the
+	// Closing also cancels pending 'session/prompt' requests whose messages have not
+	// been inserted, including held prompts. If closing prevents a prompt's user message from being inserted, the
 	// Agent MUST answer that request with '-32800' (Request Cancelled). If the message
 	// has already been inserted, the Agent MUST respond successfully with its
 	// 'messageId'. Prompt responses need not precede the close response.

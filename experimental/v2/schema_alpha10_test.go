@@ -74,7 +74,7 @@ func TestAlpha10ReplacementLists(t *testing.T) {
 
 func TestAlpha10ElicitationExactlyOneScope(t *testing.T) {
 	for _, mode := range []string{"form", "url", "future"} {
-		fields := `"mode":"` + mode + `","message":"Input","requestedSchema":{},"elicitationId":"e","url":"https://example.com"`
+		fields := `"mode":"` + mode + `","message":"Input","requestedSchema":{"type":"object","properties":{}},"elicitationId":"e","url":"https://example.com"`
 		for _, scope := range []string{``, `,"sessionId":"s","requestId":1`, `,"requestId":null`} {
 			var request CreateElicitationRequest
 			if json.Unmarshal([]byte(`{`+fields+scope+`}`), &request) == nil {
@@ -88,19 +88,19 @@ func TestAlpha10ElicitationExactlyOneScope(t *testing.T) {
 			}
 		}
 	}
-	for _, input := range []string{`{"sessionId":"s","requestId":1,"requestedSchema":{}}`, `{"sessionId":"s","requestedSchema":{"type":"array"}}`, `{"sessionId":"s","requestedSchema":{"type":null}}`} {
+	for _, input := range []string{`{"sessionId":"s","requestId":1,"requestedSchema":{"type":"object","properties":{}}}`, `{"sessionId":"s","requestedSchema":{"type":"array"}}`, `{"sessionId":"s","requestedSchema":{"type":null}}`} {
 		var mode ElicitationFormMode
 		if json.Unmarshal([]byte(input), &mode) == nil {
 			t.Fatalf("accepted form %s", input)
 		}
 	}
 	var mode ElicitationFormMode
-	if err := json.Unmarshal([]byte(`{"requestId":"r","requestedSchema":{}}`), &mode); err != nil {
+	if err := json.Unmarshal([]byte(`{"requestId":"r","requestedSchema":{"type":"object","properties":{}}}`), &mode); err != nil {
 		t.Fatal(err)
 	}
 	// Constructor helpers must include the shared fields introduced by oneOf.
 	id := RequestIdStr("r")
-	form := NewElicitationFormModeRequest(RequestId{Str: &id}, ElicitationSchema{})
+	form := NewElicitationFormModeRequest(RequestId{Str: &id}, ElicitationSchema{Type: "object", Properties: map[string]any{}})
 	if err := form.Validate(); err != nil {
 		t.Fatal(err)
 	}

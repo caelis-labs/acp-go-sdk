@@ -37,6 +37,7 @@ var (
 	Default       = jen.Default
 	Defer         = jen.Defer
 	Switch        = jen.Switch
+	Type          = jen.Type
 	Var           = jen.Var
 	If            = jen.If
 	List          = jen.List

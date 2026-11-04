@@ -31,6 +31,7 @@ func NewAgentSideConnection(agent Agent, peerInput io.Writer, peerOutput io.Read
 
 // NewAgentSideConnectionWithOptions creates a bounded v2 agent-side connection.
 func NewAgentSideConnectionWithOptions(agent Agent, peerInput io.Writer, peerOutput io.Reader, opts acp.ConnectionOptions) (*AgentSideConnection, error) {
+	opts.RejectBatch = true
 	asc := &AgentSideConnection{agent: agent}
 	conn, err := acp.NewUnstartedConnection(asc.handle, peerInput, peerOutput, opts)
 	if err != nil {
@@ -48,6 +49,7 @@ func NewClientSideConnection(client Client, peerInput io.Writer, peerOutput io.R
 
 // NewClientSideConnectionWithOptions creates a bounded v2 client-side connection.
 func NewClientSideConnectionWithOptions(client Client, peerInput io.Writer, peerOutput io.Reader, opts acp.ConnectionOptions) (*ClientSideConnection, error) {
+	opts.RejectBatch = true
 	csc := &ClientSideConnection{client: client}
 	conn, err := acp.NewUnstartedConnection(csc.handle, peerInput, peerOutput, opts)
 	if err != nil {
@@ -114,7 +116,18 @@ func (c *ClientSideConnection) CloseSession(ctx context.Context, params CloseSes
 }
 
 func (c *ClientSideConnection) Prompt(ctx context.Context, params PromptRequest) (PromptResponse, error) {
+	if err := params.Validate(); err != nil {
+		return PromptResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
 	return acp.SendRequest[PromptResponse](c.conn, ctx, AgentMethodSessionPrompt, params)
+}
+
+func (c *ClientSideConnection) CancelToolCall(ctx context.Context, params CancelToolCallRequest) (CancelToolCallResponse, error) {
+	return acp.SendRequest[CancelToolCallResponse](c.conn, ctx, AgentMethodToolCallCancel, params)
+}
+
+func (c *ClientSideConnection) CancelTerminal(ctx context.Context, params CancelTerminalRequest) (CancelTerminalResponse, error) {
+	return acp.SendRequest[CancelTerminalResponse](c.conn, ctx, AgentMethodTerminalCancel, params)
 }
 
 func (c *ClientSideConnection) Cancel(ctx context.Context, params CancelSessionNotification) error {
@@ -180,6 +193,40 @@ func (a *AgentSideConnection) handle(ctx context.Context, method string, params 
 			return nil, reqErr
 		}
 		resp, err := a.agent.Prompt(ctx, req)
+		if err != nil {
+			return nil, toRequestError(err)
+		}
+		return resp, nil
+	case AgentMethodToolCallCancel:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
+		req, reqErr := decodeParams[CancelToolCallRequest](params)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		canceller, ok := a.agent.(AgentToolCallCancel)
+		if !ok {
+			return nil, acp.NewInvalidParams(nil)
+		}
+		resp, err := canceller.CancelToolCall(ctx, req)
+		if err != nil {
+			return nil, toRequestError(err)
+		}
+		return resp, nil
+	case AgentMethodTerminalCancel:
+		if err := requireInboundKind(ctx, acp.InboundRequest, method); err != nil {
+			return nil, err
+		}
+		req, reqErr := decodeParams[CancelTerminalRequest](params)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		canceller, ok := a.agent.(AgentTerminalCancel)
+		if !ok {
+			return nil, acp.NewInvalidParams(nil)
+		}
+		resp, err := canceller.CancelTerminal(ctx, req)
 		if err != nil {
 			return nil, toRequestError(err)
 		}

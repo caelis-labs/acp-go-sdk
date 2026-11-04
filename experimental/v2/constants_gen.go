@@ -18,6 +18,8 @@ const (
 	AgentMethodSessionPrompt          = "session/prompt"
 	AgentMethodSessionResume          = "session/resume"
 	AgentMethodSessionSetConfigOption = "session/set_config_option"
+	AgentMethodTerminalCancel         = "terminal/cancel"
+	AgentMethodToolCallCancel         = "tool_call/cancel"
 )
 
 // Client method names
