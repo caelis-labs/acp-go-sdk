@@ -161,18 +161,18 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "2.4.0" ||
-		locked.TypeScript.Tag != "v2.4.0" ||
-		locked.TypeScript.Commit != "8d953276e54f8fd60108d6ffca3aefc4c83644a4" ||
-		locked.TypeScript.Integrity != "sha512-7qJ8nnyj7WesC5ve185ioTpB2/svQoeGV4HA4nLEhgDUrcmBe54/08VcXc/oL4p14tDbxxECZzdYmUYQ+4l+Wg==" {
+		locked.TypeScript.Version != "2.6.0" ||
+		locked.TypeScript.Tag != "v2.6.0" ||
+		locked.TypeScript.Commit != "8649e0af14cd1112bf02e5f137217f8c3fcf7e90" ||
+		locked.TypeScript.Integrity != "sha512-3FtL6MkAV5F9qxg0FQV8wmBszIm2xuVPoDWOILIFSDQ+Vq3Twdh7Cw6Hk2GOPUbevgrTUpUAqZXQy7Geaj79mw==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "5.0.0" ||
-		locked.Rust.Tag != "v5.0.0" ||
-		locked.Rust.Commit != "1b1399ab4a281ea6fccbdc3722a64fe35c816399" ||
-		locked.Rust.Checksum != "80ce60ce096020c2d0aa10445bc27b8856109e288abaf564ab517031ae819d69" ||
+		locked.Rust.Version != "5.2.0" ||
+		locked.Rust.Tag != "v5.2.0" ||
+		locked.Rust.Commit != "91d368ad8b6761f314da9095c4a030d365c079a9" ||
+		locked.Rust.Checksum != "32339d83e679c8092ec69d2f18e84448f4acf09b46a753e48f3e9265f920acb1" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}
@@ -330,9 +330,13 @@ func runGoClientScenario(t *testing.T, peer peerSpec, scenario string) {
 		t.Fatalf("peer advertised capabilities outside the stable core: %+v", initialized.AgentCapabilities)
 	}
 
+	if initialized.AgentCapabilities.SessionCapabilities.SystemPrompt == nil {
+		t.Fatal("system prompt capability not advertised")
+	}
 	session, err := process.Connection.NewSession(processContext, acp.NewSessionRequest{
-		Cwd:        repositoryRoot,
-		McpServers: []acp.McpServer{},
+		SystemPrompt: &acp.SystemPrompt{Mode: acp.SystemPromptModeAppend, Content: []acp.ContentBlock{acp.TextBlock("interop instructions")}},
+		Cwd:          repositoryRoot,
+		McpServers:   []acp.McpServer{},
 	})
 	if err != nil {
 		t.Fatalf("new session with %s agent: %v\nstderr:\n%s", peer.name, err, stderr.String())
@@ -346,6 +350,7 @@ func runGoClientScenario(t *testing.T, peer peerSpec, scenario string) {
 	case "core":
 		runGoEmptyPayloadProbes(t, peer)
 		client.append("empty-params:ok")
+		client.append("system-prompt:ok")
 		response, err := process.Connection.Prompt(processContext, request)
 		if err != nil {
 			t.Fatalf("core prompt to %s agent: %v\nstderr:\n%s", peer.name, err, stderr.String())
@@ -595,7 +600,7 @@ func assertScenarioEvents(t *testing.T, scenario string, got []string) {
 			}
 			positions[event] = index
 		}
-		wantEvents := []string{"empty-params:ok", "update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3", "response:end_turn"}
+		wantEvents := []string{"empty-params:ok", "system-prompt:ok", "update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3", "response:end_turn"}
 		if len(got) != len(wantEvents) {
 			t.Fatalf("core events = %v, want exactly %v", got, wantEvents)
 		}

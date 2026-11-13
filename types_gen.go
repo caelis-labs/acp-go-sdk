@@ -6082,6 +6082,14 @@ type LoadSessionRequest struct {
 	McpServers []McpServer `json:"mcpServers"`
 	// The ID of the session to load.
 	SessionId SessionId `json:"sessionId"`
+	// System-level instructions for the loaded session.
+	//
+	// Optional. Omitted and 'null' are equivalent. The Agent may then keep a
+	// system prompt it stored with the session or use its default instructions.
+	// Clients MUST only send this when the Agent advertises
+	// 'sessionCapabilities.systemPrompt', and SHOULD send the same value they used
+	// when the session was created.
+	SystemPrompt *SystemPrompt `json:"systemPrompt,omitempty"`
 }
 
 func (v *LoadSessionRequest) UnmarshalJSON(b []byte) error {
@@ -7319,6 +7327,12 @@ type NewSessionRequest struct {
 	Cwd string `json:"cwd"`
 	// List of MCP (Model Context Protocol) servers the agent should connect to.
 	McpServers []McpServer `json:"mcpServers"`
+	// System-level instructions for the new session.
+	//
+	// Optional. Omitted and 'null' are equivalent and mean the Agent uses its
+	// own default instructions. Clients MUST only send this when the Agent
+	// advertises 'sessionCapabilities.systemPrompt'.
+	SystemPrompt *SystemPrompt `json:"systemPrompt,omitempty"`
 }
 
 func (v *NewSessionRequest) UnmarshalJSON(b []byte) error {
@@ -8654,6 +8668,14 @@ type ResumeSessionRequest struct {
 	McpServers []McpServer `json:"mcpServers,omitempty"`
 	// The ID of the session to resume.
 	SessionId SessionId `json:"sessionId"`
+	// System-level instructions for the resumed session.
+	//
+	// Optional. Omitted and 'null' are equivalent. The Agent may then keep a
+	// system prompt it stored with the session or use its default instructions.
+	// Clients MUST only send this when the Agent advertises
+	// 'sessionCapabilities.systemPrompt', and SHOULD send the same value they used
+	// when the session was created.
+	SystemPrompt *SystemPrompt `json:"systemPrompt,omitempty"`
 }
 
 func (v *ResumeSessionRequest) UnmarshalJSON(b []byte) error {
@@ -8864,6 +8886,11 @@ type SessionCapabilities struct {
 	// Optional. Omitted or 'null' both mean the agent does not advertise support.
 	// Supplying '{}' means the agent supports resuming sessions.
 	Resume *SessionResumeCapabilities `json:"resume,omitempty"`
+	// Whether the agent supports 'systemPrompt' on session lifecycle requests.
+	//
+	// Optional. Omitted or 'null' both mean the agent does not advertise support.
+	// Supplying '{}' means the agent supports 'systemPrompt' in 'append' mode.
+	SystemPrompt *SessionSystemPromptCapabilities `json:"systemPrompt,omitempty"`
 }
 
 // Capabilities for the 'session/close' method.
@@ -9857,6 +9884,55 @@ func (v *SessionNotification) Validate() error {
 //
 // Supplying '{}' means the agent supports resuming sessions.
 type SessionResumeCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+}
+
+// Capabilities for client-provided system prompts.
+//
+// Supplying '{}' means the agent supports 'systemPrompt' on session lifecycle
+// requests in 'append' mode.
+type SessionSystemPromptCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Delivery modes the agent supports in addition to 'append'.
+	//
+	// Optional. Omitted or 'null' both mean the agent supports only 'append'.
+	Mode *SessionSystemPromptModeCapabilities `json:"mode,omitempty"`
+}
+
+// System prompt delivery modes the agent supports in addition to 'append'.
+//
+// 'append' has no entry because every agent advertising
+// 'sessionCapabilities.systemPrompt' supports it.
+type SessionSystemPromptModeCapabilities struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// Whether the agent supports 'override' mode.
+	//
+	// Optional. Omitted or 'null' both mean the agent does not advertise support.
+	// Supplying '{}' means the agent supports replacing its built-in default
+	// instructions with the client-provided system prompt.
+	Override *SessionSystemPromptOverrideCapabilities `json:"override,omitempty"`
+}
+
+// Capabilities for the 'override' system prompt mode.
+//
+// Supplying '{}' means the agent supports replacing its built-in default
+// instructions with the client-provided system prompt.
+type SessionSystemPromptOverrideCapabilities struct {
 	// The _meta property is reserved by ACP to allow clients and agents to attach additional
 	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
 	// these keys.
@@ -11848,6 +11924,81 @@ type StringPropertySchema struct {
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
 }
+
+// Client-provided system-level instructions for a session.
+//
+// Clients MUST only send this when the Agent advertises
+// 'sessionCapabilities.systemPrompt'. Agents that cannot apply it, for example
+// because of an unadvertised mode or an unsupported content block type, MUST
+// return an error instead of creating, loading, or resuming the session.
+type SystemPrompt struct {
+	// The _meta property is reserved by ACP to allow clients and agents to attach additional
+	// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+	// these keys.
+	//
+	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/extensibility)
+	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
+	// The system prompt content.
+	//
+	// Agents advertising the capability MUST accept 'text' content blocks.
+	// Clients MUST NOT send other content block types until a future
+	// capability allows them, and Agents MUST return an error for content
+	// blocks they do not support.
+	//
+	// Clients MUST NOT send an empty array. Agents MAY reject one with
+	// '-32602' without creating, loading, or resuming the session.
+	Content []ContentBlock `json:"content"`
+	// How the Agent combines 'content' with its own instructions.
+	//
+	// Required. Agents MUST return an error for a mode they do not support rather than
+	// treating it as 'append' or 'override'.
+	Mode SystemPromptMode `json:"mode"`
+}
+
+func (v *SystemPrompt) UnmarshalJSON(b []byte) error {
+	*v = SystemPrompt{}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	{
+		raw, ok := m["content"]
+		if !ok {
+			return fmt.Errorf("content is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("content must not be null")
+		}
+	}
+	{
+		raw, ok := m["mode"]
+		if !ok {
+			return fmt.Errorf("mode is required")
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("mode must not be null")
+		}
+	}
+	type Alias SystemPrompt
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*v = SystemPrompt(a)
+	return nil
+}
+
+// How the Agent combines a client-provided system prompt with its own instructions.
+//
+// Unknown modes are preserved so they can be stored,
+// proxied, or forwarded. An Agent MUST return an error for a mode it does not
+// support rather than treating it as 'append' or 'override'.
+type SystemPromptMode string
+
+const (
+	SystemPromptModeAppend   SystemPromptMode = "append"
+	SystemPromptModeOverride SystemPromptMode = "override"
+)
 
 // Embed a terminal created with 'terminal/create' by its id.
 //

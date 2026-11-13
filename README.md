@@ -13,7 +13,7 @@ Use it independently of Caelis or any particular agent framework.
 - **Both sides of ACP:** implement an [agent](#agent-side), build a
   [client](#client-side-and-subprocesses), and stream session updates with typed Go APIs.
 - **Stable protocol, pinned schema:** ACP wire protocol v1, generated from
-  official `schema-v1.29.1`. [Trace every generated type to its source](#protocol-provenance).
+  official `schema-v1.31.0`. [Trace every generated type to its source](#protocol-provenance).
 - **Tested across languages:** a [four-direction interoperability matrix](#official-sdk-interoperability)
   checks Go clients and agents against the official TypeScript and Rust SDKs.
 - **Predictable resource and process handling:** bounded queues, ordered
@@ -41,7 +41,7 @@ import acp "github.com/caelis-labs/acp-go-sdk"
 
 The Go module release, official schema version, and negotiated wire protocol
 version are separate identities. The install command pins the SDK release;
-`schema-v1.29.1` describes the schema used to generate its ACP v1 types.
+`schema-v1.31.0` describes the schema used to generate its ACP v1 types.
 
 ## Run an agent and client
 
@@ -211,10 +211,10 @@ See `interop/README.md` for harness boundaries and scenario definitions.
 | Identity | Pinned value |
 |---|---|
 | Wire protocol | 1 |
-| Schema artifact | 1.29.1 |
-| Schema tag | schema-v1.29.1 |
-| Upstream commit | 0fc18323a9fdad4e5b4a20ec2f1645dde843fd9b |
-| schema.json SHA256 | 0d0b1ca83c4872e5473f68926a894c7a8203b59b118e2a79bfe43dd76fbcbc1a |
+| Schema artifact | 1.31.0 |
+| Schema tag | schema-v1.31.0 |
+| Upstream commit | 0849001ca66fb975fc01111ddab9093bc8304e98 |
+| schema.json SHA256 | e747a7bec3c02708b70885bf3cccac5c72fa421390dd7e85758fd61e33b1ae21 |
 
 The exact tag object, commit, assets, and hashes are recorded in
 schema/lock.json. Generated stable code uses schema/schema.json only;
@@ -227,7 +227,7 @@ queries GitHub releases and opens an `upstream-drift` issue when a pin is
 behind.
 
 Draft ACP v2 lives in `experimental/v2`. It is generated from
-`schema-v2.0.0-alpha.13` and is not a stable API. `session/prompt` returns the
+`schema-v2.0.0-alpha.15` and is not a stable API. `session/prompt` returns the
 required `messageId` of the user message inserted into the conversation;
 the matching user-message update may arrive before or after that response.
 Running/idle/requires_action are `session/update` state updates. Its typed
@@ -251,6 +251,15 @@ or null names leave an existing name unchanged; `WithStartName` and
 tool-call updates distinguish omission, explicit null (clear), and a string
 (replace) through `NameState`, `SetName`, `ClearName`, and `UnsetName`.
 
+Stable session lifecycle requests now accept `SystemPrompt`. Clients must first
+check `AgentCapabilities.SessionCapabilities.SystemPrompt`: nil means unsupported,
+while an empty capability object supports `append`. Use `override` only when
+the nested `Mode.Override` capability is advertised. A prompt needs
+an explicit mode and nonempty text content; unknown modes are preserved for
+forwarding. Agents own support validation and must reject unsupported modes or
+content before creating, loading, or resuming a session. The SDK does not apply
+model instructions or turn this field into permission or authorization policy.
+
 Stable session notices and context compaction are available when the client
 advertises `ClientSessionCapabilities.Notices` and `.Compaction`. Compaction
 `summary`, `error`, and `_meta` preserve omitted/null/value patch states through
@@ -258,8 +267,8 @@ generated `State`, `Set`, `Clear`, and `Unset` methods. See the
 [v1.5.0 migration notes](docs/upgrading-to-v1.5.0.md) for capability policy,
 receiver validation, and the isolated v2 alpha.8 API changes. The
 [October 2026 alignment notes](docs/schema-sdk-alignment-2026-10.md) describe
-schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-04.md)
-cover schema 1.29.1 / v2 alpha.13, TypeScript 2.4.0 and Rust 5.0.0.
+schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-13.md)
+cover schema 1.31.0 / v2 alpha.15, TypeScript 2.6.0 and Rust 5.2.0.
 
 ## Resource bounds and lifecycle
 
