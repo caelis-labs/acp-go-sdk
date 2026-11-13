@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.0](https://github.com/caelis-labs/acp-go-sdk/compare/v1.6.0...v1.7.0) (2026-11-13)
+
+
+### Features
+
+* align upstream schemas and SDKs with stable system prompts ([#42](https://github.com/caelis-labs/acp-go-sdk/issues/42)) ([a571204](https://github.com/caelis-labs/acp-go-sdk/commit/a57120490868bddb77d57595b8cf5cd0fd4a90ae))
+
+
+### Bug Fixes
+
+* **protocol:** preserve v2 envelopes and gate versioned SDK interoperability ([#44](https://github.com/caelis-labs/acp-go-sdk/issues/44)) ([f614d9a](https://github.com/caelis-labs/acp-go-sdk/commit/f614d9ab91a6298f6353232f741c5e334c274537))
+
 ## [1.6.0](https://github.com/caelis-labs/acp-go-sdk/compare/v1.5.2...v1.6.0) (2026-11-04)
 
 
