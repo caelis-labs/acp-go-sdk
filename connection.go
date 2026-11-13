@@ -55,7 +55,13 @@ type ConnectionOptions struct {
 	// RejectBatch rejects each inbound JSON array as one invalid request before
 	// dispatching any entries. The default preserves JSON-RPC batch support.
 	RejectBatch bool
-	Logger      *slog.Logger
+	// AcceptRequestID is an optional profile-specific request ID validator.
+	// False rejects the request with -32600 and a null response ID before
+	// admission or dispatch. It runs on the reader and must not block, panic,
+	// or call this connection. Responses and notifications bypass it. The
+	// default accepts the stable JSON-RPC string, number and null ID forms.
+	AcceptRequestID func(json.RawMessage) bool
+	Logger          *slog.Logger
 }
 
 // DefaultConnectionOptions returns the production defaults used by
@@ -570,6 +576,12 @@ func (c *Connection) sendProtocolError(reqErr *RequestError) {
 }
 
 func (c *Connection) enqueueRequest(msg anyMessage, write responseWriter) {
+	if c.opts.AcceptRequestID != nil && !c.opts.AcceptRequestID(*msg.ID) {
+		nullID := json.RawMessage("null")
+		_ = c.writeResponse(c.ctx, write, anyMessage{ID: &nullID, Error: NewInvalidRequest(map[string]any{"error": "invalid request id for selected profile"})})
+		return
+	}
+
 	idKey, err := canonicalJSONRPCIDKey(*msg.ID)
 	if err != nil {
 		_ = c.writeResponse(c.ctx, write, anyMessage{ID: msg.ID, Error: NewInvalidRequest(map[string]any{"error": "invalid request id"})})

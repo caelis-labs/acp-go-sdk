@@ -233,7 +233,12 @@ func TestAlpha10V2RequestIDsOverConnection(t *testing.T) {
 				if id == `"ok"` || id == `9007199254740993` {
 					want = -32601
 				}
-				if response.Error == nil || response.Error.Code != want || string(response.ID) != id {
+				wantID := id
+				// An invalid v2 ID cannot be echoed as a valid error-envelope ID.
+				if want == -32600 {
+					wantID = "null"
+				}
+				if response.Error == nil || response.Error.Code != want || string(response.ID) != wantID {
 					t.Fatalf("id %s: %s", id, frame)
 				}
 			}

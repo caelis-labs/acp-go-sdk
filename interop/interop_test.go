@@ -189,7 +189,7 @@ func TestDependencyLocks(t *testing.T) {
 		t.Fatalf("TypeScript package-lock does not match versions.json: %+v", sdk)
 	}
 
-	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.toml"), fmt.Sprintf(`agent-client-protocol = { version = "=%s", features = ["process", "stdio"] }`, locked.Rust.Version))
+	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.toml"), fmt.Sprintf(`agent-client-protocol = { version = "=%s", features = ["process", "stdio", "unstable_protocol_v2"] }`, locked.Rust.Version))
 	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "rust-toolchain.toml"), `channel = "1.88.0"`)
 	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.lock"), fmt.Sprintf(`name = %q
 version = %q

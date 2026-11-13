@@ -1,0 +1,6 @@
+[
+  {"method": "session/request_permission", "params": {"sessionId": "s1", "title": "Fixture permission", "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]}, "response": {"outcome": {"outcome": "selected", "optionId": "allow"}}},
+  {"method": "elicitation/create", "params": {"mode": "form", "sessionId": "s1", "message": "Fixture input", "requestedSchema": {"type": "object", "properties": {}}}, "response": {"action": "accept", "content": {"approved": true}}},
+  {"method": "elicitation/create", "params": {"mode": "url", "sessionId": "s1", "message": "Fixture URL", "elicitationId": "e1", "url": "https://example.invalid/fixture"}, "response": {"action": "accept"}},
+  {"method": "elicitation/complete", "params": {"elicitationId": "e1"}, "notify": true}
+]
