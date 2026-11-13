@@ -299,7 +299,9 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
                 responder.respond(
                     InitializeResponse::new(request.protocol_version).agent_capabilities(
                         AgentCapabilities::new().session_capabilities(
-                            SessionCapabilities::new().list(SessionListCapabilities::new()),
+                            SessionCapabilities::new().list(SessionListCapabilities::new()).system_prompt(
+                                agent_client_protocol::v1::schema::SessionSystemPromptCapabilities::new(),
+                            ),
                         ),
                     ),
                 )
@@ -317,9 +319,13 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
         .on_receive_request(
             {
                 let next_session = Arc::clone(&next_session);
-                async move |_request: NewSessionRequest,
+                async move |request: NewSessionRequest,
                             responder: Responder<NewSessionResponse>,
                             _connection| {
+                    let expected = serde_json::json!({"mode":"append","content":[{"type":"text","text":"interop instructions"}]});
+                    if serde_json::to_value(&request.system_prompt).unwrap() != expected {
+                        return Err(agent_client_protocol::Error::invalid_params().data("expected append system prompt"));
+                    }
                     let id = next_session.fetch_add(1, Ordering::Relaxed) + 1;
                     responder.respond(NewSessionResponse::new(SessionId::new(format!(
                         "rust-session-{id}"
@@ -556,12 +562,26 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
                         .expect("events mutex poisoned")
                         .push("empty-params:ok".into());
                 }
+                if initialized
+                    .agent_capabilities
+                    .session_capabilities
+                    .system_prompt
+                    .is_none()
+                {
+                    return Err(agent_client_protocol::Error::invalid_params()
+                        .data("system prompt not advertised"));
+                }
                 let session = connection
-                    .send_request(NewSessionRequest::new(std::env::current_dir().map_err(
-                        |error| {
+                    .send_request(
+                        NewSessionRequest::new(std::env::current_dir().map_err(|error| {
                             agent_client_protocol::Error::internal_error().data(error.to_string())
-                        },
-                    )?))
+                        })?)
+                        .system_prompt(
+                            agent_client_protocol::v1::schema::SystemPrompt::new(vec![
+                                ContentBlock::Text(TextContent::new("interop instructions")),
+                            ]),
+                        ),
+                    )
                     .block_task()
                     .await?;
                 let request = PromptRequest::new(
@@ -571,6 +591,10 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
 
                 match scenario {
                     Scenario::Core => {
+                        events
+                            .lock()
+                            .expect("events mutex poisoned")
+                            .push("system-prompt:ok".into());
                         let response = connection.send_request(request).block_task().await?;
                         let stop_reason = stop_reason_name(&response.stop_reason);
                         events

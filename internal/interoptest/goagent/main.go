@@ -27,7 +27,7 @@ func (*interopAgent) Initialize(_ context.Context, request acp.InitializeRequest
 			Version: "0.0.0",
 		},
 		ProtocolVersion:   request.ProtocolVersion,
-		AgentCapabilities: acp.AgentCapabilities{SessionCapabilities: acp.SessionCapabilities{List: &acp.SessionListCapabilities{}}},
+		AgentCapabilities: acp.AgentCapabilities{SessionCapabilities: acp.SessionCapabilities{List: &acp.SessionListCapabilities{}, SystemPrompt: &acp.SessionSystemPromptCapabilities{}}},
 	}, nil
 }
 
@@ -35,7 +35,10 @@ func (*interopAgent) ListSessions(context.Context, acp.ListSessionsRequest) (acp
 	return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
 }
 
-func (a *interopAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *interopAgent) NewSession(_ context.Context, request acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if request.SystemPrompt == nil || request.SystemPrompt.Mode != acp.SystemPromptModeAppend || len(request.SystemPrompt.Content) != 1 || request.SystemPrompt.Content[0].Text == nil || request.SystemPrompt.Content[0].Text.Text != "interop instructions" {
+		return acp.NewSessionResponse{}, acp.NewInvalidParams("expected append system prompt")
+	}
 	id := a.nextSession.Add(1)
 	return acp.NewSessionResponse{
 		SessionId: acp.SessionId("go-session-" + strconv.FormatUint(id, 10)),

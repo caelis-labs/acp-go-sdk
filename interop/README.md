@@ -13,6 +13,11 @@ The core matrix runs both roles in both languages:
 - Go client to official Rust agent;
 - official Rust client to Go agent.
 
+Each agent advertises append-mode system prompts, and each client checks that
+capability before sending a text system prompt on session/new. Agents validate
+its mode and exact content before creating a session. Core traces record
+`system-prompt:ok` only after that exchange succeeds.
+
 Each direction covers the deterministic `core`, `session-cancel`, and
 `request-cancel` scenarios. The core scenario advertises notice and compaction
 capabilities and checks typed notices, ordered compaction upserts/summary chunks,
@@ -29,7 +34,7 @@ outgoing null params to omitted. Successful probes record `empty-params:ok` in
 each core trace. This matrix remains stable v1 only; experimental v2 lifecycle
 and payload regressions are Go loopback tests, not official-SDK v2 interop.
 
-The TypeScript peer uses SDK 2.4.0's default stable ACP v1 entrypoint and the
+The TypeScript peer uses SDK 2.6.0's default stable ACP v1 entrypoint and the
 `agent()` / `client()` app APIs. Its session/list, notices, compaction, permission
 and cancellation features are all present in that stable profile; no `/unstable`
 import is needed. SDK package major 2 does not select ACP wire major 2. The Rust 5 peer explicitly selects `Agent.v1()` / `Client.v1()` and

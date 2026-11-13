@@ -151,16 +151,21 @@ async function runAgent(options: Options): Promise<void> {
       }
       return {
         protocolVersion: ctx.params.protocolVersion,
-        agentCapabilities: { sessionCapabilities: { list: {} } },
+        agentCapabilities: { sessionCapabilities: { list: {}, systemPrompt: {} } },
         authMethods: [],
         agentInfo: {
           name: "typescript-interop-agent",
-          version: "2.4.0",
+          version: "2.6.0",
         },
       };
     })
     .onRequest(acp.methods.agent.session.list, () => ({ sessions: [] }))
-    .onRequest(acp.methods.agent.session.new, () => {
+    .onRequest(acp.methods.agent.session.new, (ctx) => {
+      const prompt = ctx.params.systemPrompt;
+      const block = prompt?.content[0];
+      if (!prompt || prompt.mode !== "append" || prompt.content.length !== 1 || block?.type !== "text" || block.text !== "interop instructions") {
+        throw acp.RequestError.invalidParams("expected append system prompt");
+      }
       nextSession += 1;
       const sessionId = `typescript-session-${nextSession}`;
       sessions.add(sessionId);
@@ -354,7 +359,7 @@ async function runClient(options: Options): Promise<void> {
         clientCapabilities: { session: { compaction: {}, notices: {} } },
         clientInfo: {
           name: "typescript-interop-client",
-          version: "2.4.0",
+          version: "2.6.0",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;
@@ -375,11 +380,14 @@ async function runClient(options: Options): Promise<void> {
         events.push("empty-params:ok");
       }
 
+      if (!capabilities?.sessionCapabilities?.systemPrompt) throw new Error("system prompt not advertised");
       const session = await agent.request(acp.methods.agent.session.new, {
+        systemPrompt: { mode: "append", content: [{ type: "text", text: "interop instructions" }] },
         cwd: process.cwd(),
         mcpServers: [],
       });
       observation.sessionId = session.sessionId;
+      if (options.scenario === "core") events.push("system-prompt:ok");
       const request: acp.PromptRequest = {
         sessionId: session.sessionId,
         prompt: [{ type: "text" as const, text: options.scenario }],
