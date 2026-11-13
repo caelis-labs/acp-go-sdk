@@ -1,0 +1,10 @@
+{
+  "name": "v2-null-session",
+  "version": 2,
+  "profile": "null-session",
+  "steps": [
+    {"method": "initialize", "params": {"protocolVersion": 2, "info": {"name": "contract", "version": "1"}}, "expect": {"protocolVersion": 2, "capabilities": {"session": null}}},
+    {"method": "session/new", "params": {"cwd": "/tmp"}, "error": -32602},
+    {"method": "_interop/inspect", "params": {}, "expect": {"mutations": 0}}
+  ]
+}

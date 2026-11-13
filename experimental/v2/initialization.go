@@ -68,13 +68,20 @@ func NewUnsupportedProtocolVersion(requested ProtocolVersion, supported []Protoc
 	return &acp.RequestError{Code: -32022, Message: "Unsupported protocol version", Data: map[string]any{"requested": requested, "supported": supported}}
 }
 
+// IsValidRequestID reports whether raw is a non-null v2 string or signed
+// integer request ID. Raw ProtocolRouter connections should install it as
+// ConnectionOptions.AcceptRequestID so invalid IDs produce null error IDs.
+func IsValidRequestID(raw json.RawMessage) bool {
+	var id RequestId
+	return json.Unmarshal(raw, &id) == nil
+}
+
 func validateRequestID(ctx context.Context) *acp.RequestError {
 	info, ok := acp.InboundInfoFromContext(ctx)
 	if !ok || info.Kind != acp.InboundRequest {
 		return nil
 	}
-	var id RequestId
-	if json.Unmarshal(info.RequestID, &id) != nil {
+	if !IsValidRequestID(info.RequestID) {
 		return acp.NewInvalidRequest(map[string]any{"error": "ACP v2 requires a string or integer request ID"})
 	}
 	return nil

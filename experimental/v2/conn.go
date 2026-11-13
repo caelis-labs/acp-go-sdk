@@ -11,6 +11,15 @@ import (
 	acp "github.com/caelis-labs/acp-go-sdk"
 )
 
+// protocolConnectionOptions enforces v2 envelopes without weakening a caller's
+// additional request ID admission predicate.
+func protocolConnectionOptions(opts acp.ConnectionOptions) acp.ConnectionOptions {
+	opts.RejectBatch = true
+	accept := opts.AcceptRequestID
+	opts.AcceptRequestID = func(raw json.RawMessage) bool { return IsValidRequestID(raw) && (accept == nil || accept(raw)) }
+	return opts
+}
+
 // AgentSideConnection is the experimental v2 agent view of a connection.
 type AgentSideConnection struct {
 	initialization
@@ -31,7 +40,7 @@ func NewAgentSideConnection(agent Agent, peerInput io.Writer, peerOutput io.Read
 
 // NewAgentSideConnectionWithOptions creates a bounded v2 agent-side connection.
 func NewAgentSideConnectionWithOptions(agent Agent, peerInput io.Writer, peerOutput io.Reader, opts acp.ConnectionOptions) (*AgentSideConnection, error) {
-	opts.RejectBatch = true
+	opts = protocolConnectionOptions(opts)
 	asc := &AgentSideConnection{agent: agent}
 	conn, err := acp.NewUnstartedConnection(asc.handle, peerInput, peerOutput, opts)
 	if err != nil {
@@ -49,7 +58,7 @@ func NewClientSideConnection(client Client, peerInput io.Writer, peerOutput io.R
 
 // NewClientSideConnectionWithOptions creates a bounded v2 client-side connection.
 func NewClientSideConnectionWithOptions(client Client, peerInput io.Writer, peerOutput io.Reader, opts acp.ConnectionOptions) (*ClientSideConnection, error) {
-	opts.RejectBatch = true
+	opts = protocolConnectionOptions(opts)
 	csc := &ClientSideConnection{client: client}
 	conn, err := acp.NewUnstartedConnection(csc.handle, peerInput, peerOutput, opts)
 	if err != nil {

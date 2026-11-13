@@ -24,6 +24,8 @@ type nullablePresenceProp struct {
 	definition  *load.Definition
 	indirect    bool
 	recoverable bool
+	// omitNull preserves a meaningful empty snapshot while nil/null mean unreported.
+	omitNull bool
 }
 
 // initialCommandsProperty deliberately limits recovery to the newly released
@@ -76,22 +78,28 @@ func nullablePresenceProperties(schema *load.Schema, properties map[string]*load
 	metaPatch := metadataPatchObject(properties)
 	for _, propertyName := range keys {
 		definition := properties[propertyName]
-		if _, ok := required[propertyName]; ok || !includesNull(definition) {
+		// Unconstrained JSON also admits null. V2 tool upserts represent these
+		// two fields as MaybeUndefined<Value>, even though JSON Schema does not
+		// need an explicit nullable type for an unconstrained payload.
+		opaquePatch := metaPatch && (propertyName == "rawInput" || propertyName == "rawOutput") && ir.PrimaryType(definition) == "" && definition.Ref == "" && len(definition.AnyOf) == 0 && len(definition.AllOf) == 0
+		if _, ok := required[propertyName]; ok || (!includesNull(definition) && !opaquePatch) {
 			continue
 		}
 		description := strings.ToLower(definition.Description)
+		preserveEmpty := propertyName == "background" && strings.Contains(strings.Join(strings.Fields(description), " "), "`[]` means no background work is running")
 		compactionPatch := properties["compactionId"] != nil && properties["status"] != nil &&
 			(propertyName == "summary" || propertyName == "error" || propertyName == "_meta")
-		if !metaPatch && !compactionPatch && !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
+		if !preserveEmpty && !metaPatch && !compactionPatch && !strings.Contains(description, "set to null to clear") && !strings.Contains(description, "`null` clears") {
 			continue
 		}
 		fieldName := util.ToExportedField(propertyName)
 		result = append(result, nullablePresenceProp{
+			omitNull:    preserveEmpty,
 			fieldName:   fieldName,
 			propName:    propertyName,
 			presentName: "has" + fieldName,
 			definition:  definition,
-			indirect:    propertyName != "_meta" && ir.PrimaryType(definition) != "array" && ir.PrimaryType(definition) != "object",
+			indirect:    !opaquePatch && propertyName != "_meta" && ir.PrimaryType(definition) != "array" && ir.PrimaryType(definition) != "object",
 			recoverable: slices.Contains(recovery, propertyName),
 		})
 	}
@@ -109,6 +117,9 @@ func metadataPatchObject(properties map[string]*load.Definition) bool {
 
 func appendNullablePresenceFields(fields []Code, properties []nullablePresenceProp) []Code {
 	for _, property := range properties {
+		if property.omitNull {
+			continue
+		}
 		fields = append(fields, Id(property.presentName).Bool().Tag(map[string]string{"json": "-"}))
 	}
 	return fields
@@ -118,7 +129,7 @@ func emitNullablePresenceMarshalBody(g *Group, properties []nullablePresenceProp
 	for _, property := range properties {
 		rawName := "_" + property.propName + "JSON"
 		g.Var().Id(rawName).Qual("encoding/json", "RawMessage")
-		g.If(Id("a").Dot(property.fieldName).Op("!=").Nil()).BlockFunc(func(h *Group) {
+		branch := g.If(Id("a").Dot(property.fieldName).Op("!=").Nil()).BlockFunc(func(h *Group) {
 			value := Id("a").Dot(property.fieldName)
 			if property.indirect {
 				value = Op("*").Add(value)
@@ -126,9 +137,10 @@ func emitNullablePresenceMarshalBody(g *Group, properties []nullablePresenceProp
 			h.List(Id("encoded"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(value)
 			h.If(Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
 			h.Id(rawName).Op("=").Id("encoded")
-		}).Else().If(Id("a").Dot(property.presentName)).Block(
-			Id(rawName).Op("=").Qual("encoding/json", "RawMessage").Call(Lit("null")),
-		)
+		})
+		if !property.omitNull {
+			branch.Else().If(Id("a").Dot(property.presentName)).Block(Id(rawName).Op("=").Qual("encoding/json", "RawMessage").Call(Lit("null")))
+		}
 	}
 
 	fields := []Code{Id("Alias")}
@@ -143,6 +155,9 @@ func emitNullablePresenceMarshalBody(g *Group, properties []nullablePresenceProp
 
 func emitNullablePresenceUnmarshalAssignments(g *Group, properties []nullablePresenceProp) {
 	for _, property := range properties {
+		if property.omitNull {
+			continue
+		}
 		g.BlockFunc(func(h *Group) {
 			if property.recoverable {
 				// Recovery to nil means omitted, except when the wire value was
@@ -162,6 +177,9 @@ func emitNullablePresenceUnmarshalAssignments(g *Group, properties []nullablePre
 
 func emitNullablePresenceAccessors(f *File, name string, properties []nullablePresenceProp) {
 	for _, property := range properties {
+		if property.omitNull {
+			continue
+		}
 		f.Func().Params(Id("v").Id(name)).Id(property.fieldName+"State").Params().Id("NullableFieldState").Block(
 			If(Id("v").Dot(property.fieldName).Op("!=").Nil()).Block(Return(Id("NullableFieldValue"))),
 			If(Id("v").Dot(property.presentName)).Block(Return(Id("NullableFieldNull"))),

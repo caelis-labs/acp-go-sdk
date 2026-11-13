@@ -187,24 +187,17 @@ Then run:
 make interop
 ~~~
 
-| Client | Agent | Scenarios |
-|---|---|---|
-| Go | Official TypeScript SDK | Core conversation, session cancellation, request cancellation |
-| Official TypeScript SDK | Go | Core conversation, session cancellation, request cancellation |
-| Go | Official Rust SDK | Core conversation, session cancellation, request cancellation |
-| Official Rust SDK | Go | Core conversation, session cancellation, request cancellation |
+Both ACP wire profiles run all four Go↔TypeScript and Go↔Rust directions.
+The complete gate has **89 external cases**: 28 stable v1 cases, 40 draft v2
+contract cases, and 21 v2 receiver probes. It checks lifecycle/system prompt
+capabilities and rejection side effects, prompt message-ID association, state
+and cancellation semantics, reverse requests and typed update payloads.
 
-These **12 cases** check ordered session updates, negotiated notices and
-compaction (including patch clears and summary chunks), a reverse permission request,
-`session/cancel`, and the distinct `$/cancel_request` / JSON-RPC `-32800` path.
-Exact SDK identities and toolchain requirements are recorded in
-[interop/versions.json](interop/versions.json) and [upstream/lock.json](upstream/lock.json).
-CI uploads a machine-readable report with the tested commit, dependency pins,
-and event traces; local runs write it to `.artifacts/interop/evidence.json`.
-The matrix covers these stable v1 scenarios, not every optional capability or
-every third-party agent.
-
-See `interop/README.md` for harness boundaries and scenario definitions.
+Exact SDK identities are in [interop/versions.json](interop/versions.json).
+CI uploads three reports under `.artifacts/interop/`, recording commits,
+fixture hashes, dependencies and traces. See [the matrix](interop/README.md)
+for the full case inventory and explicit boundaries; this is not a claim of
+all optional capabilities or all third-party agents.
 
 ## Protocol provenance
 
@@ -231,8 +224,8 @@ Draft ACP v2 lives in `experimental/v2`. It is generated from
 required `messageId` of the user message inserted into the conversation;
 the matching user-message update may arrive before or after that response.
 Running/idle/requires_action are `session/update` state updates. Its typed
-dispatch and lifecycle have Go loopback coverage; the official TypeScript/Rust
-interoperability gate currently covers stable ACP v1.
+dispatch and lifecycle have Go loopback coverage and an independent official
+TypeScript/Rust four-direction interoperability gate.
 Do not import this package from the stable root.
 
 V2 new/resume responses expose optional `AvailableCommands`. Each command is
@@ -269,6 +262,8 @@ receiver validation, and the isolated v2 alpha.8 API changes. The
 [October 2026 alignment notes](docs/schema-sdk-alignment-2026-10.md) describe
 schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-13.md)
 cover schema 1.31.0 / v2 alpha.15, TypeScript 2.6.0 and Rust 5.2.0.
+The [versioned interop follow-up](docs/versioned-interop-2026-11-13.md) expands
+the verification to both wire profiles and fixes invalid v2 error-envelope IDs.
 
 ## Resource bounds and lifecycle
 

@@ -10218,6 +10218,26 @@ type IdleStateUpdateEndTurn struct {
 	StopReason string           `json:"stopReason"`
 }
 
+func (v IdleStateUpdateEndTurn) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateEndTurn
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
+}
+
 func (v *IdleStateUpdateEndTurn) UnmarshalJSON(b []byte) error {
 	*v = IdleStateUpdateEndTurn{}
 	var m map[string]json.RawMessage
@@ -10278,6 +10298,26 @@ type IdleStateUpdateMaxTokens struct {
 	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
 	Background []BackgroundWork `json:"background,omitempty"`
 	StopReason string           `json:"stopReason"`
+}
+
+func (v IdleStateUpdateMaxTokens) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateMaxTokens
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
 }
 
 func (v *IdleStateUpdateMaxTokens) UnmarshalJSON(b []byte) error {
@@ -10343,6 +10383,26 @@ type IdleStateUpdateMaxTurnRequests struct {
 	StopReason string           `json:"stopReason"`
 }
 
+func (v IdleStateUpdateMaxTurnRequests) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateMaxTurnRequests
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
+}
+
 func (v *IdleStateUpdateMaxTurnRequests) UnmarshalJSON(b []byte) error {
 	*v = IdleStateUpdateMaxTurnRequests{}
 	var m map[string]json.RawMessage
@@ -10403,6 +10463,26 @@ type IdleStateUpdateRefusal struct {
 	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
 	Background []BackgroundWork `json:"background,omitempty"`
 	StopReason string           `json:"stopReason"`
+}
+
+func (v IdleStateUpdateRefusal) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateRefusal
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
 }
 
 func (v *IdleStateUpdateRefusal) UnmarshalJSON(b []byte) error {
@@ -10476,6 +10556,26 @@ type IdleStateUpdateCancelled struct {
 	StopReason string           `json:"stopReason"`
 }
 
+func (v IdleStateUpdateCancelled) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateCancelled
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
+}
+
 func (v *IdleStateUpdateCancelled) UnmarshalJSON(b []byte) error {
 	*v = IdleStateUpdateCancelled{}
 	var m map[string]json.RawMessage
@@ -10545,6 +10645,26 @@ type IdleStateUpdateError struct {
 	// Agents SHOULD include it.
 	Error      *Error `json:"error,omitempty"`
 	StopReason string `json:"stopReason"`
+}
+
+func (v IdleStateUpdateError) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateError
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
 }
 
 func (v *IdleStateUpdateError) UnmarshalJSON(b []byte) error {
@@ -10621,6 +10741,26 @@ type IdleStateUpdateNone struct {
 	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
 	Background []BackgroundWork `json:"background,omitempty"`
 	StopReason any              `json:"stopReason,omitempty"`
+}
+
+func (v IdleStateUpdateNone) MarshalJSON() ([]byte, error) {
+	type Alias IdleStateUpdateNone
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
 }
 
 func (v *IdleStateUpdateNone) UnmarshalJSON(b []byte) error {
@@ -15429,6 +15569,27 @@ type RequiresActionStateUpdate struct {
 	Background []BackgroundWork `json:"background,omitempty"`
 }
 
+func (v RequiresActionStateUpdate) MarshalJSON() ([]byte, error) {
+	type Alias RequiresActionStateUpdate
+	var a Alias
+	a = Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
+}
+
 func (v *RequiresActionStateUpdate) UnmarshalJSON(b []byte) error {
 	*v = RequiresActionStateUpdate{}
 	var m map[string]json.RawMessage
@@ -15847,6 +16008,27 @@ type RunningStateUpdate struct {
 	//
 	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
 	Background []BackgroundWork `json:"background,omitempty"`
+}
+
+func (v RunningStateUpdate) MarshalJSON() ([]byte, error) {
+	type Alias RunningStateUpdate
+	var a Alias
+	a = Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
 }
 
 func (v *RunningStateUpdate) UnmarshalJSON(b []byte) error {
@@ -18445,6 +18627,8 @@ type SessionToolCallUpdate struct {
 	hasKind         bool       `json:"-"`
 	hasLocations    bool       `json:"-"`
 	hasName         bool       `json:"-"`
+	hasRawInput     bool       `json:"-"`
+	hasRawOutput    bool       `json:"-"`
 	hasStatus       bool       `json:"-"`
 	hasTitle        bool       `json:"-"`
 }
@@ -18512,6 +18696,26 @@ func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 	} else if a.hasName {
 		_nameJSON = json.RawMessage("null")
 	}
+	var _rawInputJSON json.RawMessage
+	if a.RawInput != nil {
+		encoded, err := json.Marshal(a.RawInput)
+		if err != nil {
+			return nil, err
+		}
+		_rawInputJSON = encoded
+	} else if a.hasRawInput {
+		_rawInputJSON = json.RawMessage("null")
+	}
+	var _rawOutputJSON json.RawMessage
+	if a.RawOutput != nil {
+		encoded, err := json.Marshal(a.RawOutput)
+		if err != nil {
+			return nil, err
+		}
+		_rawOutputJSON = encoded
+	} else if a.hasRawOutput {
+		_rawOutputJSON = json.RawMessage("null")
+	}
 	var _statusJSON json.RawMessage
 	if a.Status != nil {
 		encoded, err := json.Marshal(*a.Status)
@@ -18540,6 +18744,8 @@ func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 		Kind         json.RawMessage `json:"kind,omitempty"`
 		Locations    json.RawMessage `json:"locations,omitempty"`
 		Name         json.RawMessage `json:"name,omitempty"`
+		RawInput     json.RawMessage `json:"rawInput,omitempty"`
+		RawOutput    json.RawMessage `json:"rawOutput,omitempty"`
 		Status       json.RawMessage `json:"status,omitempty"`
 		Title        json.RawMessage `json:"title,omitempty"`
 	}{
@@ -18550,6 +18756,8 @@ func (v SessionToolCallUpdate) MarshalJSON() ([]byte, error) {
 		Locations:    _locationsJSON,
 		Meta:         __metaJSON,
 		Name:         _nameJSON,
+		RawInput:     _rawInputJSON,
+		RawOutput:    _rawOutputJSON,
 		Status:       _statusJSON,
 		Title:        _titleJSON,
 	})
@@ -18693,6 +18901,14 @@ func (v *SessionToolCallUpdate) UnmarshalJSON(b []byte) error {
 	{
 		raw, present := m["name"]
 		a.hasName = present && (a.Name != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["rawInput"]
+		a.hasRawInput = present && (a.RawInput != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["rawOutput"]
+		a.hasRawOutput = present && (a.RawOutput != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
 		raw, present := m["status"]
@@ -18854,6 +19070,56 @@ func (v *SessionToolCallUpdate) ClearName() {
 func (v *SessionToolCallUpdate) UnsetName() {
 	v.Name = nil
 	v.hasName = false
+}
+
+func (v SessionToolCallUpdate) RawInputState() NullableFieldState {
+	if v.RawInput != nil {
+		return NullableFieldValue
+	}
+	if v.hasRawInput {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetRawInput(value any) {
+	v.RawInput = value
+	v.hasRawInput = true
+}
+
+func (v *SessionToolCallUpdate) ClearRawInput() {
+	v.RawInput = nil
+	v.hasRawInput = true
+}
+
+func (v *SessionToolCallUpdate) UnsetRawInput() {
+	v.RawInput = nil
+	v.hasRawInput = false
+}
+
+func (v SessionToolCallUpdate) RawOutputState() NullableFieldState {
+	if v.RawOutput != nil {
+		return NullableFieldValue
+	}
+	if v.hasRawOutput {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *SessionToolCallUpdate) SetRawOutput(value any) {
+	v.RawOutput = value
+	v.hasRawOutput = true
+}
+
+func (v *SessionToolCallUpdate) ClearRawOutput() {
+	v.RawOutput = nil
+	v.hasRawOutput = true
+}
+
+func (v *SessionToolCallUpdate) UnsetRawOutput() {
+	v.RawOutput = nil
+	v.hasRawOutput = false
 }
 
 func (v SessionToolCallUpdate) StatusState() NullableFieldState {
@@ -22150,6 +22416,26 @@ type StateUpdateRunning struct {
 	State      string           `json:"state"`
 }
 
+func (v StateUpdateRunning) MarshalJSON() ([]byte, error) {
+	type Alias StateUpdateRunning
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
+}
+
 func (v *StateUpdateRunning) UnmarshalJSON(b []byte) error {
 	*v = StateUpdateRunning{}
 	var m map[string]json.RawMessage
@@ -22266,6 +22552,26 @@ type StateUpdateRequiresAction struct {
 	// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
 	Background []BackgroundWork `json:"background,omitempty"`
 	State      string           `json:"state"`
+}
+
+func (v StateUpdateRequiresAction) MarshalJSON() ([]byte, error) {
+	type Alias StateUpdateRequiresAction
+	a := Alias(v)
+	var _backgroundJSON json.RawMessage
+	if a.Background != nil {
+		encoded, err := json.Marshal(a.Background)
+		if err != nil {
+			return nil, err
+		}
+		_backgroundJSON = encoded
+	}
+	return json.Marshal(struct {
+		Alias
+		Background json.RawMessage `json:"background,omitempty"`
+	}{
+		Alias:      a,
+		Background: _backgroundJSON,
+	})
 }
 
 func (v *StateUpdateRequiresAction) UnmarshalJSON(b []byte) error {
@@ -24820,6 +25126,8 @@ type ToolCallUpdate struct {
 	hasKind         bool       `json:"-"`
 	hasLocations    bool       `json:"-"`
 	hasName         bool       `json:"-"`
+	hasRawInput     bool       `json:"-"`
+	hasRawOutput    bool       `json:"-"`
 	hasStatus       bool       `json:"-"`
 	hasTitle        bool       `json:"-"`
 }
@@ -24888,6 +25196,26 @@ func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 	} else if a.hasName {
 		_nameJSON = json.RawMessage("null")
 	}
+	var _rawInputJSON json.RawMessage
+	if a.RawInput != nil {
+		encoded, err := json.Marshal(a.RawInput)
+		if err != nil {
+			return nil, err
+		}
+		_rawInputJSON = encoded
+	} else if a.hasRawInput {
+		_rawInputJSON = json.RawMessage("null")
+	}
+	var _rawOutputJSON json.RawMessage
+	if a.RawOutput != nil {
+		encoded, err := json.Marshal(a.RawOutput)
+		if err != nil {
+			return nil, err
+		}
+		_rawOutputJSON = encoded
+	} else if a.hasRawOutput {
+		_rawOutputJSON = json.RawMessage("null")
+	}
 	var _statusJSON json.RawMessage
 	if a.Status != nil {
 		encoded, err := json.Marshal(*a.Status)
@@ -24916,6 +25244,8 @@ func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 		Kind         json.RawMessage `json:"kind,omitempty"`
 		Locations    json.RawMessage `json:"locations,omitempty"`
 		Name         json.RawMessage `json:"name,omitempty"`
+		RawInput     json.RawMessage `json:"rawInput,omitempty"`
+		RawOutput    json.RawMessage `json:"rawOutput,omitempty"`
 		Status       json.RawMessage `json:"status,omitempty"`
 		Title        json.RawMessage `json:"title,omitempty"`
 	}{
@@ -24926,6 +25256,8 @@ func (v ToolCallUpdate) MarshalJSON() ([]byte, error) {
 		Locations:    _locationsJSON,
 		Meta:         __metaJSON,
 		Name:         _nameJSON,
+		RawInput:     _rawInputJSON,
+		RawOutput:    _rawOutputJSON,
 		Status:       _statusJSON,
 		Title:        _titleJSON,
 	})
@@ -25060,6 +25392,14 @@ func (v *ToolCallUpdate) UnmarshalJSON(b []byte) error {
 	{
 		raw, present := m["name"]
 		a.hasName = present && (a.Name != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["rawInput"]
+		a.hasRawInput = present && (a.RawInput != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
+	}
+	{
+		raw, present := m["rawOutput"]
+		a.hasRawOutput = present && (a.RawOutput != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")))
 	}
 	{
 		raw, present := m["status"]
@@ -25221,6 +25561,56 @@ func (v *ToolCallUpdate) ClearName() {
 func (v *ToolCallUpdate) UnsetName() {
 	v.Name = nil
 	v.hasName = false
+}
+
+func (v ToolCallUpdate) RawInputState() NullableFieldState {
+	if v.RawInput != nil {
+		return NullableFieldValue
+	}
+	if v.hasRawInput {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetRawInput(value any) {
+	v.RawInput = value
+	v.hasRawInput = true
+}
+
+func (v *ToolCallUpdate) ClearRawInput() {
+	v.RawInput = nil
+	v.hasRawInput = true
+}
+
+func (v *ToolCallUpdate) UnsetRawInput() {
+	v.RawInput = nil
+	v.hasRawInput = false
+}
+
+func (v ToolCallUpdate) RawOutputState() NullableFieldState {
+	if v.RawOutput != nil {
+		return NullableFieldValue
+	}
+	if v.hasRawOutput {
+		return NullableFieldNull
+	}
+	return NullableFieldAbsent
+}
+
+func (v *ToolCallUpdate) SetRawOutput(value any) {
+	v.RawOutput = value
+	v.hasRawOutput = true
+}
+
+func (v *ToolCallUpdate) ClearRawOutput() {
+	v.RawOutput = nil
+	v.hasRawOutput = true
+}
+
+func (v *ToolCallUpdate) UnsetRawOutput() {
+	v.RawOutput = nil
+	v.hasRawOutput = false
 }
 
 func (v ToolCallUpdate) StatusState() NullableFieldState {

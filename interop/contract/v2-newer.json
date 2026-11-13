@@ -1,0 +1,11 @@
+{
+  "name": "v2-newer",
+  "version": 2,
+  "profile": "full",
+  "steps": [
+    {"method": "initialize", "params": {"protocolVersion": 3, "info": {"name": "contract", "version": "1"}, "capabilities": {"elicitation": {"form": {}, "url": {}}}}, "expect": {"protocolVersion": 2}},
+    {"method": "initialize", "params": {"protocolVersion": 2, "info": {"name": "contract", "version": "1"}, "capabilities": {"elicitation": {"form": {}, "url": {}}}}, "expect": {"protocolVersion": 2}},
+    {"method": "session/new", "params": {"cwd": "/tmp"}, "expect": {"sessionId": "s1"}},
+    {"method": "initialize", "params": {"protocolVersion": 2, "info": {"name": "contract", "version": "1"}, "capabilities": {"elicitation": {"form": {}, "url": {}}}}, "error": -32600}
+  ]
+}
