@@ -9,6 +9,24 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/cmd/generate/internal/util"
 )
 
+func emitBoundedStringDecode(f *File, name string, def *load.Definition) {
+	f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
+		g.Var().Id("value").Op("*").String()
+		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("value")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		g.If(Id("value").Op("==").Nil()).Block(Return(Qual("fmt", "Errorf").Call(Lit(name + " must be a string"))))
+		g.Id("length").Op(":=").Qual("unicode/utf8", "RuneCountInString").Call(Op("*").Id("value"))
+		if def.MinLength > 0 {
+			g.If(Id("length").Op("<").Lit(def.MinLength)).Block(Return(Qual("fmt", "Errorf").Call(Lit(name+" requires at least %d characters"), Lit(def.MinLength))))
+		}
+		if def.MaxLength > 0 {
+			g.If(Id("length").Op(">").Lit(def.MaxLength)).Block(Return(Qual("fmt", "Errorf").Call(Lit(name+" allows at most %d characters"), Lit(def.MaxLength))))
+		}
+		g.Op("*").Id("v").Op("=").Id(name).Call(Op("*").Id("value"))
+		g.Return(Nil())
+	})
+	f.Line()
+}
+
 // Stable receivers retain their established recovery policy. Experimental v2
 // follows every recovery hint in its pinned schema. Executable/session inputs
 // remain strict, including null elements in otherwise valid arrays.

@@ -668,6 +668,9 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 		case ir.PrimaryType(def) == "string" || ir.PrimaryType(def) == "integer" || ir.PrimaryType(def) == "number" || ir.PrimaryType(def) == "boolean":
 			f.Type().Id(name).Add(primitiveJenType(def))
 			f.Line()
+			if ir.PrimaryType(def) == "string" && (def.MinLength > 0 || def.MaxLength > 0) {
+				emitBoundedStringDecode(f, name, def)
+			}
 		case ir.PrimaryType(def) == "object" && len(def.Properties) == 0:
 			// Empty object shape: emit a concrete empty struct so methods can be defined
 			// and the wire encoding is consistently {} rather than null.

@@ -40,6 +40,7 @@ function match(w: J, g: J): void {
 class Engine {
   sessions: J = {};
   history: J = {};
+  promptKeys = new Map<string, Map<string, string>>();
   pending: J[] = [];
   toolCancelable = false;
   terminalCancelable = false;
@@ -196,7 +197,7 @@ class Engine {
             version === 2
               ? [
                   ...(p.replayFrom?.type === "start"
-                    ? (this.history[id] ?? [])
+                    ? [...(this.history[id] ?? []), { sessionUpdate: "replay_complete" }]
                     : []),
                   {
                     background: [],
@@ -217,8 +218,11 @@ class Engine {
     if (["session/close", "session/delete"].includes(method)) {
       const s = this.sessions[p.sessionId];
       if (!s) this.missing();
-      if (method === "session/delete") delete this.sessions[p.sessionId];
-      else {
+      if (method === "session/delete") {
+        delete this.sessions[p.sessionId];
+        delete this.history[p.sessionId];
+        this.promptKeys.delete(p.sessionId);
+      } else {
         s.active = false;
         this.foreground = false;
         this.background = false;
@@ -231,10 +235,21 @@ class Engine {
       if (!p.prompt?.length) this.reject();
       if (p.prompt.some((b: J) => !["text", "resource_link"].includes(b.type)))
         this.reject();
+      const messageId = p.prompt[0].text === "cancel" ? "m2" : "m1";
+      if (p.idempotencyKey != null) {
+        let keys = this.promptKeys.get(p.sessionId);
+        if (!keys) {
+          keys = new Map();
+          this.promptKeys.set(p.sessionId, keys);
+        }
+        const previous = keys.get(p.idempotencyKey);
+        if (previous !== undefined) return done({ messageId: previous });
+        keys.set(p.idempotencyKey, messageId);
+      }
       this.history[p.sessionId] ??= [];
       this.history[p.sessionId].push({
         sessionUpdate: "user_message",
-        messageId: p.prompt[0].text === "cancel" ? "m2" : "m1",
+        messageId,
         content: p.prompt,
       });
       const outgoing = structuredClone(vectors);
