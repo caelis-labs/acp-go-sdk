@@ -7,9 +7,9 @@ const (
 
 	// SchemaArtifactVersion is the exact official JSON Schema release used to
 	// generate the stable root package.
-	SchemaArtifactVersion = "1.31.0"
+	SchemaArtifactVersion = "1.33.0"
 
 	// SchemaTag and SchemaCommit identify the immutable upstream source.
-	SchemaTag    = "schema-v1.31.0"
-	SchemaCommit = "0849001ca66fb975fc01111ddab9093bc8304e98"
+	SchemaTag    = "schema-v1.33.0"
+	SchemaCommit = "50672b4ce6563a90dd0e4a82a2d3a398dc1181ee"
 )

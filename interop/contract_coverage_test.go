@@ -2,11 +2,11 @@ package interop_test
 
 import (
 	"encoding/json"
-	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"os"
 	"path/filepath"
 	"testing"
 
+	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/acp-go-sdk/internal/interoptest/contract"
 )
 
@@ -15,6 +15,7 @@ var contractCaseNames = []string{"v1-full", "v1-append", "v1-null", "v1-omitted"
 func TestContractCasesCoverPinnedSurface(t *testing.T) {
 	dir := filepath.Join(repositoryRoot, "interop/contract")
 	seen := map[string]bool{}
+	var liveUpdates []contract.Object
 	for _, name := range contractCaseNames {
 		var c contract.Case
 		if err := contract.Read(filepath.Join(dir, name+".json"), &c); err != nil {
@@ -27,6 +28,7 @@ func TestContractCasesCoverPinnedSurface(t *testing.T) {
 		for _, s := range c.Steps {
 			if c.Version == 2 {
 				seen[s.Method] = true
+				liveUpdates = append(liveUpdates, s.Updates...)
 			}
 			if s.Error != 0 && len(s.Updates) > 0 && !s.Cancel {
 				t.Fatalf("%s: rejected requests must not expect updates", name)
@@ -60,12 +62,12 @@ func TestContractCasesCoverPinnedSurface(t *testing.T) {
 			t.Errorf("missing v2 method %s", d.Method)
 		}
 	}
-	var vectors []map[string]any
+	var vectors []contract.Object
 	if err := contract.Read(filepath.Join(dir, "updates.json"), &vectors); err != nil {
 		t.Fatal(err)
 	}
 	updates := map[string]bool{}
-	for _, v := range vectors {
+	for _, v := range append(liveUpdates, vectors...) {
 		raw, err := json.Marshal(v)
 		if err != nil {
 			t.Fatal(err)
@@ -85,6 +87,8 @@ func TestContractCasesCoverPinnedSurface(t *testing.T) {
 		if err := contract.Match(v, got); err != nil {
 			t.Fatalf("v2 update codec lost fields: %v", err)
 		}
+	}
+	for _, v := range liveUpdates {
 		name, _ := v["sessionUpdate"].(string)
 		updates[name] = true
 	}

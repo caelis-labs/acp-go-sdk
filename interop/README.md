@@ -36,9 +36,14 @@ It checks prompt message IDs against user-message upserts; chunks, repeated IDs,
 unknown variants and explicit patch clears; running/requires_action/idle ordering;
 reverse permission plus form and URL elicitation and completion; authentication
 login/logout; boolean config success and rejection without mutation; resume
-replay followed by a current-state snapshot; close/delete/list behavior; and
-unsupported replay cursors. State snapshots and tool/terminal cancellation use
-agent-owned fixture work, without starting OS processes.
+replay followed by `replay_complete` and a current-state snapshot;
+close/delete/list behavior; and unsupported replay cursors. The suite also
+retries a keyed prompt and checks for one insertion in replay, rejects an empty
+key, and exchanges subagent announcements, display references, inter-session
+message updates, a structured diff and an unknown-state snapshot. These are wire
+fixtures. The suite does not run child sessions or exercise their controls.
+State snapshots and tool/terminal cancellation use agent-owned fixture work,
+without starting OS processes.
 
 `session/cancel` stops foreground fixture work and preserves background work.
 `$/cancel_request` cancels a pending prompt before insertion and returns `-32800`;
@@ -50,8 +55,8 @@ notifications after a prompt response so both legal response/update orderings
 are exercised. The extensions `_interop/inspect` and `_interop/flush` exist only
 in these test agents and never enter generated ACP objects or the stable API.
 
-TypeScript 2.6.0 uses its default v1 entrypoint and, separately,
-`@agentclientprotocol/sdk/experimental/v2`. Rust 5.2.0 explicitly uses `.v1()`
+TypeScript 2.8.0 uses its default v1 entrypoint and, separately,
+`@agentclientprotocol/sdk/experimental/v2`. Rust 5.4.0 explicitly uses `.v1()`
 and `.v2()`, with `unstable_protocol_v2` enabled only in the peer dependency.
 No additional unstable feature set is enabled. SDK package majors do not choose
 the ACP wire major. Go contract peers use the bounded connection API, v2's

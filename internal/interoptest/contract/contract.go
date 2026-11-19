@@ -35,6 +35,7 @@ type Session struct {
 	Permissions string `json:"permissions"`
 	McpServers  any    `json:"mcpServers"`
 	Active      bool   `json:"active"`
+	promptKeys  map[string]string
 }
 type Engine struct {
 	sync.Mutex
@@ -180,6 +181,7 @@ func (e *Engine) Handle(method string, p Object) (any, []Object, *acp.RequestErr
 			updates := []Object{}
 			if cursor := object(p["replayFrom"]); cursor["type"] == "start" {
 				updates = append(updates, e.History[id]...)
+				updates = append(updates, Object{"sessionUpdate": "replay_complete"})
 			}
 			updates = append(updates, Object{"sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn", "background": []any{}})
 			return Object{}, updates, nil
@@ -204,6 +206,7 @@ func (e *Engine) Handle(method string, p Object) (any, []Object, *acp.RequestErr
 		}
 		if method == "session/delete" {
 			delete(e.Sessions, id)
+			delete(e.History, id)
 		} else {
 			s.Active = false
 			e.Foreground = false
@@ -227,10 +230,20 @@ func (e *Engine) Handle(method string, p Object) (any, []Object, *acp.RequestErr
 				return nil, nil, invalid()
 			}
 		}
+		key, _ := p["idempotencyKey"].(string)
+		if previous, ok := s.promptKeys[key]; ok {
+			return Object{"messageId": previous}, nil, nil
+		}
 		text, _ := object(blocks[0])["text"].(string)
 		messageID := "m1"
 		if text == "cancel" {
 			messageID = "m2"
+		}
+		if key != "" {
+			if s.promptKeys == nil {
+				s.promptKeys = make(map[string]string)
+			}
+			s.promptKeys[key] = messageID
 		}
 		e.History[id] = append(e.History[id], Object{"sessionUpdate": "user_message", "messageId": messageID, "content": blocks})
 		vectors := append([]Object(nil), e.updates...)

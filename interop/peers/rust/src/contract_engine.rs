@@ -13,6 +13,7 @@ pub struct Engine {
     terminal_cancelable: bool,
     pending: Vec<Value>,
     history: BTreeMap<String, Vec<Value>>,
+    prompt_keys: BTreeMap<String, BTreeMap<String, &'static str>>,
     logged_in: bool,
     config: bool,
     vectors: Vec<Value>,
@@ -34,6 +35,7 @@ impl Engine {
             terminal_cancelable: false,
             pending: vec![],
             history: BTreeMap::new(),
+            prompt_keys: BTreeMap::new(),
             logged_in: false,
             config: false,
             vectors,
@@ -168,7 +170,9 @@ impl Engine {
                 } else if self.version == 2 {
                     {
                         let mut updates = if p["replayFrom"]["type"] == "start" {
-                            self.history.get(&id).cloned().unwrap_or_default()
+                            let mut replay = self.history.get(&id).cloned().unwrap_or_default();
+                            replay.push(json!({"sessionUpdate":"replay_complete"}));
+                            replay
                         } else {
                             vec![]
                         };
@@ -189,6 +193,8 @@ impl Engine {
                 };
                 if method == "session/delete" {
                     self.sessions.remove(id);
+                    self.history.remove(id);
+                    self.prompt_keys.remove(id);
                 } else {
                     self.sessions.get_mut(id).unwrap()["active"] = json!(false);
                     self.foreground = false;
@@ -211,7 +217,21 @@ impl Engine {
                         return Err(invalid());
                     }
                 }
-                self.history.entry(id.to_string()).or_default().push(json!({"sessionUpdate":"user_message","messageId":if blocks[0]["text"]=="cancel"{"m2"}else{"m1"},"content":blocks}));
+                let message_id = if blocks[0]["text"] == "cancel" {
+                    "m2"
+                } else {
+                    "m1"
+                };
+                if let Some(key) = p["idempotencyKey"].as_str() {
+                    let keys = self.prompt_keys.entry(id.to_string()).or_default();
+                    if let Some(previous) = keys.get(key) {
+                        return done(json!({"messageId":previous}));
+                    }
+                    keys.insert(key.to_string(), message_id);
+                }
+                self.history.entry(id.to_string()).or_default().push(
+                    json!({"sessionUpdate":"user_message","messageId":message_id,"content":blocks}),
+                );
                 let mut outgoing = self.vectors.clone();
                 outgoing[0]["content"] = json!(blocks);
                 self.tool_cancelable = true;

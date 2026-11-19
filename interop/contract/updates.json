@@ -7,7 +7,10 @@
   {"sessionUpdate": "state_update", "state": "running"},
   {"sessionUpdate": "agent_message_chunk", "messageId": "a1", "content": {"type": "text", "text": "answer"}},
   {"sessionUpdate": "agent_message", "messageId": "a1", "content": [{"type": "text", "text": "answer"}]},
-  {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "name": "fixture", "status": "in_progress", "capabilities": {"cancel": {}}, "rawInput": {"path": "/fixture"}, "rawOutput": {"value": 1}},
+  {"sessionUpdate": "subagent_update", "sessionId": "child1", "title": "Fixture child", "cwd": null, "capabilities": {"cancel": {}}, "additionalDirectories": []},
+  {"sessionUpdate": "session_message", "messageId": "to-child", "senderSessionId": "s1", "recipientSessionId": "child1", "senderMessageId": null, "content": null, "_meta": {"retain": 42}},
+  {"sessionUpdate": "session_message_chunk", "messageId": "to-child", "content": {"type": "text", "text": "child message"}},
+  {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "name": "fixture", "status": "in_progress", "capabilities": {"cancel": {}}, "rawInput": {"path": "/fixture"}, "rawOutput": {"value": 1}, "content": [{"type": "session", "sessionId": "child1"}, {"type": "diff", "changes": [{"operation": "modify", "path": "/fixture/example.txt"}]}]},
   {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "name": null, "content": [], "rawOutput": null, "capabilities": null, "_meta": null, "rawInput": null},
   {"sessionUpdate": "terminal_update", "terminalId": "term1", "command": "/fixture/never-executed", "capabilities": {"cancel": {}}},
   {"sessionUpdate": "terminal_output_chunk", "terminalId": "term1", "data": "aGk="},
@@ -26,5 +29,6 @@
   {"sessionUpdate": "future_update", "payload": {"keep": 42}},
   {"sessionUpdate": "state_update", "state": "requires_action"},
   {"sessionUpdate": "state_update", "state": "running"},
+  {"sessionUpdate": "state_update", "state": "unknown", "background": [{"type": "subagent", "sessionId": "child1"}]},
   {"sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn"}
 ]

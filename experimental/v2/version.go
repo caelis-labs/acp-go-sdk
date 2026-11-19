@@ -3,6 +3,6 @@ package v2
 const (
 	// SchemaTag and SchemaCommit identify the pinned official v2 schema
 	// snapshot used to generate this package.
-	SchemaTag    = "schema-v2.0.0-alpha.15"
-	SchemaCommit = "0849001ca66fb975fc01111ddab9093bc8304e98"
+	SchemaTag    = "schema-v2.0.0-alpha.17"
+	SchemaCommit = "50672b4ce6563a90dd0e4a82a2d3a398dc1181ee"
 )
