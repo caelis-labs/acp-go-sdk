@@ -112,7 +112,9 @@ func metadataPatchObject(properties map[string]*load.Definition) bool {
 		return false
 	}
 	description := strings.Join(strings.Fields(strings.ToLower(meta.Description)), " ")
-	return strings.Contains(description, "object patches the stored metadata by top-level key")
+	return strings.Contains(description, "object patches the stored metadata by top-level key") ||
+		strings.Contains(description, "omitted means unchanged. `null` removes the metadata.") ||
+		strings.Contains(description, "omitted leaves metadata unchanged. `null` removes it.")
 }
 
 func appendNullablePresenceFields(fields []Code, properties []nullablePresenceProp) []Code {

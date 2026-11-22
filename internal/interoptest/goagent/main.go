@@ -18,7 +18,8 @@ type interopAgent struct {
 }
 
 func (*interopAgent) Initialize(_ context.Context, request acp.InitializeRequest) (acp.InitializeResponse, error) {
-	if request.ClientCapabilities.Session == nil || request.ClientCapabilities.Session.Compaction == nil || request.ClientCapabilities.Session.Notices == nil {
+	if request.ClientCapabilities.Session == nil || request.ClientCapabilities.Session.Compaction == nil || request.ClientCapabilities.Session.Notices == nil ||
+		request.ClientCapabilities.Plan == nil || request.ClientCapabilities.Subagents == nil {
 		return acp.InitializeResponse{}, acp.NewInvalidParams(map[string]any{"error": "interop client must advertise display capabilities"})
 	}
 	return acp.InitializeResponse{
@@ -131,6 +132,9 @@ func (a *interopAgent) displayUpdates(ctx context.Context, sessionID acp.Session
 		{CompactionUpdate: &acp.SessionCompactionUpdate{CompactionId: "interop-compaction", Status: acp.CompactionStatusInProgress}},
 		{CompactionSummaryChunk: &acp.SessionUpdateCompactionSummaryChunk{CompactionId: "interop-compaction", Content: acp.TextBlock("Retained summary")}},
 		{CompactionUpdate: completed},
+		{PlanUpdate: &acp.SessionPlanUpdate{Plan: acp.NewPlanUpdateContentMarkdown("interop-plan", "- Review changes")}},
+		{PlanRemoved: &acp.SessionUpdatePlanRemoved{PlanId: "interop-plan"}},
+		{SubagentUpdate: &acp.SessionSubagentUpdate{SessionId: "interop-child"}},
 	} {
 		if err := a.connection.SessionUpdate(ctx, acp.SessionNotification{SessionId: sessionID, Update: update}); err != nil {
 			return err

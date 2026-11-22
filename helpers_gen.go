@@ -2,6 +2,24 @@
 
 package acp
 
+// NewPlanUpdateContentItems constructs a PlanUpdateContent using the 'items' variant.
+func NewPlanUpdateContentItems(planId PlanId, entries []PlanEntry) PlanUpdateContent {
+	return PlanUpdateContent{Items: &PlanUpdateContentItems{
+		Entries: entries,
+		PlanId:  planId,
+		Type:    "items",
+	}}
+}
+
+// NewPlanUpdateContentMarkdown constructs a PlanUpdateContent using the 'markdown' variant.
+func NewPlanUpdateContentMarkdown(planId PlanId, content string) PlanUpdateContent {
+	return PlanUpdateContent{Markdown: &PlanUpdateContentMarkdown{
+		Content: content,
+		PlanId:  planId,
+		Type:    "markdown",
+	}}
+}
+
 // NewRequestPermissionOutcomeCancelled constructs a RequestPermissionOutcome using the 'cancelled' variant.
 func NewRequestPermissionOutcomeCancelled() RequestPermissionOutcome {
 	return RequestPermissionOutcome{Cancelled: &RequestPermissionOutcomeCancelled{Outcome: "cancelled"}}

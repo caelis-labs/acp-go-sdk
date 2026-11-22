@@ -11,10 +11,11 @@ use agent_client_protocol::v1::schema::{
     CompactionCapabilities, CompactionStatus, CompactionSummaryChunk, CompactionUpdate,
     ContentBlock, ContentChunk, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, Meta, NewSessionRequest, NewSessionResponse, Notice, NoticeCapabilities,
-    NoticeSeverity, PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionCapabilities, SessionId, SessionListCapabilities,
-    SessionNotification, SessionUpdate, StopReason, TextContent, ToolCallStatus, ToolCallUpdate,
+    NoticeSeverity, PermissionOption, PermissionOptionKind, PlanCapabilities, PlanRemoved,
+    PlanUpdate, PlanUpdateContent, PromptRequest, PromptResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionCapabilities, SessionId, SessionListCapabilities, SessionNotification, SessionUpdate,
+    StopReason, SubagentCapabilities, SubagentUpdate, TextContent, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::v1::{ConnectionTo, Responder};
@@ -204,6 +205,12 @@ fn send_display_updates(
                 .error(MaybeUndefined::<String>::Null)
                 .meta(MaybeUndefined::<Meta>::Null),
         ),
+        SessionUpdate::PlanUpdate(PlanUpdate::new(PlanUpdateContent::markdown(
+            "interop-plan",
+            "- Review changes",
+        ))),
+        SessionUpdate::PlanRemoved(PlanRemoved::new("interop-plan")),
+        SessionUpdate::SubagentUpdate(SubagentUpdate::new("interop-child")),
     ] {
         connection.send_notification(SessionNotification::new(session_id.clone(), update))?;
     }
@@ -251,6 +258,14 @@ fn update_event(
                 patch.compaction_id
             ))
         }
+        SessionUpdate::PlanUpdate(update) => match &update.plan {
+            PlanUpdateContent::Markdown(plan) => {
+                Some(format!("plan:{}:{}", plan.plan_id, plan.content))
+            }
+            _ => None,
+        },
+        SessionUpdate::PlanRemoved(update) => Some(format!("plan-removed:{}", update.plan_id)),
+        SessionUpdate::SubagentUpdate(update) => Some(format!("subagent:{}", update.session_id)),
         _ => update_text(notification).map(|text| format!("update:{text}")),
     };
     Ok(event)
@@ -293,7 +308,11 @@ async fn run_agent(options: Options) -> Result<(), agent_client_protocol::Error>
                 let Some(session) = request.client_capabilities.session.as_ref() else {
                     return Err(agent_client_protocol::Error::invalid_params());
                 };
-                if session.compaction.is_none() || session.notices.is_none() {
+                if session.compaction.is_none()
+                    || session.notices.is_none()
+                    || request.client_capabilities.plan.is_none()
+                    || request.client_capabilities.subagents.is_none()
+                {
                     return Err(agent_client_protocol::Error::invalid_params());
                 }
                 responder.respond(
@@ -520,11 +539,14 @@ async fn run_client(options: Options) -> Result<(), agent_client_protocol::Error
                 let initialized = connection
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1).client_capabilities(
-                            ClientCapabilities::new().session(
-                                ClientSessionCapabilities::new()
-                                    .compaction(CompactionCapabilities::new())
-                                    .notices(NoticeCapabilities::new()),
-                            ),
+                            ClientCapabilities::new()
+                                .plan(PlanCapabilities::new())
+                                .subagents(SubagentCapabilities::new())
+                                .session(
+                                    ClientSessionCapabilities::new()
+                                        .compaction(CompactionCapabilities::new())
+                                        .notices(NoticeCapabilities::new()),
+                                ),
                         ),
                     )
                     .block_task()

@@ -53,6 +53,12 @@ type Definition struct {
 	MinItems    int                    `json:"minItems"`
 	XSide       string                 `json:"x-side"`
 	XMethod     string                 `json:"x-method"`
+
+	PropertyNames *Definition `json:"propertyNames"`
+	Not           *Definition `json:"not"`
+	If            *Definition `json:"if"`
+	Then          *Definition `json:"then"`
+
 	// Default holds the JSON Schema default value, when present.
 	// Used by generators to synthesize defaulting behavior.
 	Default any `json:"default"`

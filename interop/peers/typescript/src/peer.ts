@@ -94,6 +94,9 @@ function displayUpdates(): acp.SessionUpdate[] {
     { sessionUpdate: "compaction_update", compactionId: "interop-compaction", status: "in_progress" },
     { sessionUpdate: "compaction_summary_chunk", compactionId: "interop-compaction", content: { type: "text", text: "Retained summary" } },
     { sessionUpdate: "compaction_update", compactionId: "interop-compaction", status: "completed", summary: [], error: null, _meta: null },
+    { sessionUpdate: "plan_update", plan: { type: "markdown", planId: "interop-plan", content: "- Review changes" } },
+    { sessionUpdate: "plan_removed", planId: "interop-plan" },
+    { sessionUpdate: "subagent_update", sessionId: "interop-child" },
   ];
 }
 
@@ -110,6 +113,11 @@ function updateEvent(notification: acp.SessionNotification): string | undefined 
     if (!valid) throw new Error("compaction patch state lost");
     return `compaction:${update.compactionId}:${update.status}:${update.status === "in_progress" ? "absent" : "cleared"}`;
   }
+  if (update.sessionUpdate === "plan_update" && update.plan.type === "markdown") {
+    return `plan:${update.plan.planId}:${update.plan.content}`;
+  }
+  if (update.sessionUpdate === "plan_removed") return `plan-removed:${update.planId}`;
+  if (update.sessionUpdate === "subagent_update") return `subagent:${update.sessionId}`;
   const text = textFromUpdate(notification);
   return text === undefined ? undefined : `update:${text}`;
 }
@@ -143,7 +151,9 @@ async function runAgent(options: Options): Promise<void> {
     .onRequest(acp.methods.agent.initialize, (ctx) => {
       if (
         !ctx.params.clientCapabilities?.session?.compaction ||
-        !ctx.params.clientCapabilities?.session?.notices
+        !ctx.params.clientCapabilities?.session?.notices ||
+        !ctx.params.clientCapabilities?.plan ||
+        !ctx.params.clientCapabilities?.subagents
       ) {
         throw acp.RequestError.invalidParams({
           error: "interop client must advertise display capabilities",
@@ -155,7 +165,7 @@ async function runAgent(options: Options): Promise<void> {
         authMethods: [],
         agentInfo: {
           name: "typescript-interop-agent",
-          version: "2.8.0",
+          version: "2.9.1",
         },
       };
     })
@@ -356,10 +366,10 @@ async function runClient(options: Options): Promise<void> {
     await app.connectWith(acp.ndJsonStream(output, input), async (agent) => {
       const initialized = await agent.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: { session: { compaction: {}, notices: {} } },
+        clientCapabilities: { session: { compaction: {}, notices: {} }, plan: {}, subagents: {} },
         clientInfo: {
           name: "typescript-interop-client",
-          version: "2.8.0",
+          version: "2.9.1",
         },
       });
       observation.protocolVersion = initialized.protocolVersion;

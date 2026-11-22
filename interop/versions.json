@@ -2,18 +2,18 @@
   "typescript": {
     "package": "@agentclientprotocol/sdk",
     "repository": "https://github.com/agentclientprotocol/typescript-sdk",
-    "version": "2.8.0",
-    "tag": "v2.8.0",
-    "commit": "97d748e705a03be67ce4cb4c78ff0011fcca7592",
-    "integrity": "sha512-EjsvoRX8nEH2z3PAVI2ILsVXAefVcSlLPeXGjlQoFgkJE71F2J0Fj7N6oL/k7SnP0vY+9hmONPFz/K2zalnTiw=="
+    "version": "2.9.1",
+    "tag": "v2.9.1",
+    "commit": "ab16fb07b4e7e5dd8e55633b42930857223c4cd0",
+    "integrity": "sha512-8iJdxGa3SunLfzqLLb3RfQFmr4hnmWeAyeAK6MbkJiXJbrRlMRgKsVnDl/7Hu48yu/30gAlytNDzh5W77rv5SA=="
   },
   "rust": {
     "package": "agent-client-protocol",
     "repository": "https://github.com/agentclientprotocol/rust-sdk",
-    "version": "5.4.0",
-    "tag": "v5.4.0",
-    "commit": "0fe20235100691d2aa1bc38f729e8ab156338b4f",
-    "checksum": "5480352b071301dfa2ba98d36d02132ad95c336116b469548feca2f45eaf0b3d",
+    "version": "5.5.1",
+    "tag": "v5.5.1",
+    "commit": "34aea54f7314b42563b09112fe40b0cd5eb29b8a",
+    "checksum": "6720bf8b44f96762eaeb8e5869468a1b6aaec9b679b0862a22d07574ea2d8cb0",
     "toolchain": "1.88.0"
   }
 }
