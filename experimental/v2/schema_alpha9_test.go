@@ -158,8 +158,8 @@ func TestAlpha9MetadataPatchWireValues(t *testing.T) {
 	}
 }
 
-func TestAlpha9PlanContentAllowsFileAndMarkdownAsRawVariants(t *testing.T) {
-	for _, kind := range []string{"file", "markdown", "future"} {
+func TestPlanContentPreservesUnknownVariants(t *testing.T) {
+	for _, kind := range []string{"file", "future"} {
 		wire := fmt.Sprintf(`{"type":%q,"planId":"p","payload":{"n":9007199254740993,"value":null}}`, kind)
 		var content PlanUpdateContent
 		if err := json.Unmarshal([]byte(wire), &content); err != nil {

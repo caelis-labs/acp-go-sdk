@@ -292,9 +292,10 @@ func TestAlpha8TypedUpdatesLoopback(t *testing.T) {
 	defer func() { _ = client.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	status := CompactionStatusInProgress
 	for _, update := range []SessionUpdate{
 		{Notice: &SessionUpdateNotice{Severity: NoticeSeverityInfo, Title: "Notice"}},
-		{CompactionUpdate: &SessionCompactionUpdate{CompactionId: "c", Status: CompactionStatusInProgress}},
+		{CompactionUpdate: &SessionCompactionUpdate{CompactionId: "c", Status: &status}},
 		{CompactionSummaryChunk: &SessionUpdateCompactionSummaryChunk{CompactionId: "c", Content: TextBlock("summary")}},
 		IdleErrorUpdate(nil),
 	} {

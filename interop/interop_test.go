@@ -161,18 +161,18 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "2.8.0" ||
-		locked.TypeScript.Tag != "v2.8.0" ||
-		locked.TypeScript.Commit != "97d748e705a03be67ce4cb4c78ff0011fcca7592" ||
-		locked.TypeScript.Integrity != "sha512-EjsvoRX8nEH2z3PAVI2ILsVXAefVcSlLPeXGjlQoFgkJE71F2J0Fj7N6oL/k7SnP0vY+9hmONPFz/K2zalnTiw==" {
+		locked.TypeScript.Version != "2.9.1" ||
+		locked.TypeScript.Tag != "v2.9.1" ||
+		locked.TypeScript.Commit != "ab16fb07b4e7e5dd8e55633b42930857223c4cd0" ||
+		locked.TypeScript.Integrity != "sha512-8iJdxGa3SunLfzqLLb3RfQFmr4hnmWeAyeAK6MbkJiXJbrRlMRgKsVnDl/7Hu48yu/30gAlytNDzh5W77rv5SA==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "5.4.0" ||
-		locked.Rust.Tag != "v5.4.0" ||
-		locked.Rust.Commit != "0fe20235100691d2aa1bc38f729e8ab156338b4f" ||
-		locked.Rust.Checksum != "5480352b071301dfa2ba98d36d02132ad95c336116b469548feca2f45eaf0b3d" ||
+		locked.Rust.Version != "5.5.1" ||
+		locked.Rust.Tag != "v5.5.1" ||
+		locked.Rust.Commit != "34aea54f7314b42563b09112fe40b0cd5eb29b8a" ||
+		locked.Rust.Checksum != "6720bf8b44f96762eaeb8e5869468a1b6aaec9b679b0862a22d07574ea2d8cb0" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}
@@ -271,8 +271,12 @@ func runGoEmptyPayloadProbes(t *testing.T, peer peerSpec) {
 	conn := acp.NewConnection(nil, process.Input(), process.Output())
 	defer func() { _ = conn.Close() }()
 	response, err := acp.SendRequest[acp.InitializeResponse](conn, ctx, "initialize", acp.InitializeRequest{
-		ProtocolVersion:    1,
-		ClientCapabilities: acp.ClientCapabilities{Session: &acp.ClientSessionCapabilities{Compaction: &acp.CompactionCapabilities{}, Notices: &acp.NoticeCapabilities{}}},
+		ProtocolVersion: 1,
+		ClientCapabilities: acp.ClientCapabilities{
+			Session:   &acp.ClientSessionCapabilities{Compaction: &acp.CompactionCapabilities{}, Notices: &acp.NoticeCapabilities{}},
+			Plan:      &acp.PlanCapabilities{},
+			Subagents: &acp.SubagentCapabilities{},
+		},
 	})
 	if err != nil || response.AgentCapabilities.SessionCapabilities.List == nil {
 		t.Fatalf("%s probe initialize: %+v %v", peer.name, response, err)
@@ -310,8 +314,12 @@ func runGoClientScenario(t *testing.T, peer peerSpec, scenario string) {
 	defer func() { _ = process.Close() }()
 
 	initialized, err := process.Connection.Initialize(processContext, acp.InitializeRequest{
-		ProtocolVersion:    acp.ProtocolVersion(acp.WireProtocolVersion),
-		ClientCapabilities: acp.ClientCapabilities{Session: &acp.ClientSessionCapabilities{Compaction: &acp.CompactionCapabilities{}, Notices: &acp.NoticeCapabilities{}}},
+		ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
+		ClientCapabilities: acp.ClientCapabilities{
+			Session:   &acp.ClientSessionCapabilities{Compaction: &acp.CompactionCapabilities{}, Notices: &acp.NoticeCapabilities{}},
+			Plan:      &acp.PlanCapabilities{},
+			Subagents: &acp.SubagentCapabilities{},
+		},
 		ClientInfo: &acp.Implementation{
 			Name:    "go-interop-client",
 			Version: "0.0.0",
@@ -499,6 +507,16 @@ func (c *recordingClient) RequestPermission(_ context.Context, request acp.Reque
 
 func (c *recordingClient) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
 	update := notification.Update
+	if update.PlanUpdate != nil && update.PlanUpdate.Plan.Markdown != nil {
+		plan := update.PlanUpdate.Plan.Markdown
+		c.append("plan:" + string(plan.PlanId) + ":" + plan.Content)
+	}
+	if update.PlanRemoved != nil {
+		c.append("plan-removed:" + string(update.PlanRemoved.PlanId))
+	}
+	if update.SubagentUpdate != nil {
+		c.append("subagent:" + string(update.SubagentUpdate.SessionId))
+	}
 	if update.Notice != nil {
 		c.append("notice:" + string(update.Notice.Severity) + ":" + update.Notice.Title)
 	}
@@ -600,7 +618,7 @@ func assertScenarioEvents(t *testing.T, scenario string, got []string) {
 			}
 			positions[event] = index
 		}
-		wantEvents := []string{"empty-params:ok", "system-prompt:ok", "update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3", "response:end_turn"}
+		wantEvents := []string{"empty-params:ok", "system-prompt:ok", "update:core-1", "update:core-2", "permission:allow", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "plan:interop-plan:- Review changes", "plan-removed:interop-plan", "subagent:interop-child", "update:core-3", "response:end_turn"}
 		if len(got) != len(wantEvents) {
 			t.Fatalf("core events = %v, want exactly %v", got, wantEvents)
 		}
@@ -613,7 +631,7 @@ func assertScenarioEvents(t *testing.T, scenario string, got []string) {
 			positions["update:core-2"] < positions["update:core-3"] &&
 			positions["permission:allow"] < positions["update:core-3"] &&
 			positions["update:core-3"] < positions["response:end_turn"]
-		display := []string{"update:core-2", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "update:core-3"}
+		display := []string{"update:core-2", "notice:warning:Interop notice", "compaction:interop-compaction:in_progress:absent", "summary:interop-compaction:Retained summary", "compaction:interop-compaction:completed:cleared", "plan:interop-plan:- Review changes", "plan-removed:interop-plan", "subagent:interop-child", "update:core-3"}
 		for i := 1; i < len(display); i++ {
 			ordered = ordered && positions[display[i-1]] < positions[display[i]]
 		}

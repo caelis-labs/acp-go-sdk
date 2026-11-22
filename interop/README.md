@@ -9,7 +9,7 @@ MCP commands, tools or terminal commands.
 
 | Suite | Profile | Directions / receivers | Cases |
 | --- | --- | --- | --- |
-| Conversation, permission, notices/compaction, empty params, session/request cancellation | v1 | Four directions × three scenarios | 12 |
+| Conversation, permission, notices/compaction, plans/subagents, empty params, session/request cancellation | v1 | Four directions × three scenarios | 12 |
 | System prompt lifecycle and capability contracts | v1 | Four directions × four capability profiles | 16 |
 | System prompt lifecycle and capability contracts | v2 | Four directions × four capability profiles | 16 |
 | Omitted/null session capability | v2 | Four directions × two profiles | 8 |
@@ -30,10 +30,15 @@ and rejected overrides. The fixture agents retain the old prompt for omitted/nul
 load/resume, but assertions deliberately allow either retention or defaults:
 that choice belongs to the application, not the SDK.
 
+The v1 conversation case advertises plan and subagent capabilities and checks a
+Markdown plan replacement, plan removal, and a child-session announcement in
+all four directions. The fixture does not start a child session.
+
 The v2 lifecycle case exercises all 13 agent methods in the pinned non-unstable
 schema, all four client methods, and every known session-update discriminator.
 It checks prompt message IDs against user-message upserts; chunks, repeated IDs,
-unknown variants and explicit patch clears; running/requires_action/idle ordering;
+unknown variants, Markdown plan replacement and removal, and omitted/null
+compaction status; running/requires_action/idle ordering;
 reverse permission plus form and URL elicitation and completion; authentication
 login/logout; boolean config success and rejection without mutation; resume
 replay followed by `replay_complete` and a current-state snapshot;
@@ -55,8 +60,8 @@ notifications after a prompt response so both legal response/update orderings
 are exercised. The extensions `_interop/inspect` and `_interop/flush` exist only
 in these test agents and never enter generated ACP objects or the stable API.
 
-TypeScript 2.8.0 uses its default v1 entrypoint and, separately,
-`@agentclientprotocol/sdk/experimental/v2`. Rust 5.4.0 explicitly uses `.v1()`
+TypeScript 2.9.1 uses its default v1 entrypoint and, separately,
+`@agentclientprotocol/sdk/experimental/v2`. Rust 5.5.1 explicitly uses `.v1()`
 and `.v2()`, with `unstable_protocol_v2` enabled only in the peer dependency.
 No additional unstable feature set is enabled. SDK package majors do not choose
 the ACP wire major. Go contract peers use the bounded connection API, v2's

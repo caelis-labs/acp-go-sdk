@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"encoding/json"
 	"slices"
 	"sort"
 
@@ -53,6 +54,8 @@ func displayRecoveryProperties(schema *load.Schema, def *load.Definition) []stri
 		names = []string{"_meta", "description"}
 	case p["compactionId"] != nil && p["content"] != nil:
 		names = []string{"_meta"}
+	case p["subagents"] != nil && p["plan"] != nil:
+		names = []string{"plan", "subagents"}
 	case p["compaction"] != nil && p["notices"] != nil:
 		names = []string{"compaction", "notices"}
 	case p["stopReason"] != nil:
@@ -167,6 +170,8 @@ func emitReceiverNullDefaults(g *Group, def *load.Definition) {
 }
 
 func emitReceiverPropertyChecks(g *Group, schema *load.Schema, def *load.Definition) {
+	emitForbiddenPropertyNames(g, def.PropertyNames)
+	emitConditionalPropertyChecks(g, schema, def.If, def.Then)
 	for _, name := range strictReceiverProperties(def) {
 		prop := def.Properties[name]
 		if prop == nil {
@@ -212,6 +217,56 @@ func emitReceiverPropertyChecks(g *Group, schema *load.Schema, def *load.Definit
 					Return(Qual("fmt", "Errorf").Call(Lit(name+" is too short"))),
 				),
 			)
+		})
+	}
+}
+
+// The v2 schema forbids named properties on otherwise open objects. Presence
+// is forbidden even when the corresponding value is null.
+func emitForbiddenPropertyNames(g *Group, names *load.Definition) {
+	if names == nil || names.Not == nil {
+		return
+	}
+	for _, value := range append([]any{names.Not.Const}, names.Not.Enum...) {
+		if name, ok := value.(string); ok {
+			g.If(List(Id("_"), Id("present")).Op(":=").Id("m").Index(Lit(name)), Id("present")).Block(
+				Return(Qual("fmt", "Errorf").Call(Lit(name + " is not allowed"))),
+			)
+		}
+	}
+}
+
+// Handle the pinned schema's property discriminator with a conditional
+// required payload reference (used by v2 negotiation errors).
+func emitConditionalPropertyChecks(g *Group, schema *load.Schema, predicate, consequent *load.Definition) {
+	if predicate == nil || consequent == nil || len(predicate.Properties) != 1 {
+		return
+	}
+	for name, property := range predicate.Properties {
+		if property.Const == nil {
+			return
+		}
+		match, err := json.Marshal(property.Const)
+		if err != nil {
+			return
+		}
+		g.If(Qual("bytes", "Equal").Call(
+			Qual("bytes", "TrimSpace").Call(Id("m").Index(Lit(name))),
+			Index().Byte().Parens(Lit(string(match))),
+		)).BlockFunc(func(h *Group) {
+			emitRequiredPresenceChecks(h, schema, consequent)
+			for _, field := range consequent.Required {
+				value := consequent.Properties[field]
+				if value == nil || value.Ref == "" {
+					continue
+				}
+				h.Block(
+					Var().Id("value").Add(jenTypeFor(value)),
+					If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("m").Index(Lit(field)), Op("&").Id("value")), Id("err").Op("!=").Nil()).Block(
+						Return(Qual("fmt", "Errorf").Call(Lit(field+": %w"), Id("err"))),
+					),
+				)
+			}
 		})
 	}
 }
