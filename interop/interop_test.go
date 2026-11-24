@@ -161,18 +161,18 @@ func TestDependencyLocks(t *testing.T) {
 	readJSON(t, filepath.Join(repositoryRoot, "interop", "versions.json"), &locked)
 	if locked.TypeScript.Package != "@agentclientprotocol/sdk" ||
 		locked.TypeScript.Repository != "https://github.com/agentclientprotocol/typescript-sdk" ||
-		locked.TypeScript.Version != "2.9.1" ||
-		locked.TypeScript.Tag != "v2.9.1" ||
-		locked.TypeScript.Commit != "ab16fb07b4e7e5dd8e55633b42930857223c4cd0" ||
-		locked.TypeScript.Integrity != "sha512-8iJdxGa3SunLfzqLLb3RfQFmr4hnmWeAyeAK6MbkJiXJbrRlMRgKsVnDl/7Hu48yu/30gAlytNDzh5W77rv5SA==" {
+		locked.TypeScript.Version != "2.12.0" ||
+		locked.TypeScript.Tag != "v2.12.0" ||
+		locked.TypeScript.Commit != "6b84c6da9430a1e4aba9c87c0b45f8b43a6aea9a" ||
+		locked.TypeScript.Integrity != "sha512-nSkamfY4Lw9/AVBU5G5V9p82ScXhANDMBybQwcPH/9+euUtZm04/VFUMaLj4gLFEXxQEy+QP1VQiKgSRbYVIPg==" {
 		t.Fatalf("unexpected TypeScript lock: %+v", locked.TypeScript)
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "5.5.1" ||
-		locked.Rust.Tag != "v5.5.1" ||
-		locked.Rust.Commit != "34aea54f7314b42563b09112fe40b0cd5eb29b8a" ||
-		locked.Rust.Checksum != "6720bf8b44f96762eaeb8e5869468a1b6aaec9b679b0862a22d07574ea2d8cb0" ||
+		locked.Rust.Version != "5.6.0" ||
+		locked.Rust.Tag != "v5.6.0" ||
+		locked.Rust.Commit != "81e9d7284024cca48e5756615b47f5102fe37e3d" ||
+		locked.Rust.Checksum != "0804940deae7feccabb0408bc63bd9fefb7e4d0d3bcd8e72c5764288c487cac3" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}
@@ -189,7 +189,7 @@ func TestDependencyLocks(t *testing.T) {
 		t.Fatalf("TypeScript package-lock does not match versions.json: %+v", sdk)
 	}
 
-	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.toml"), fmt.Sprintf(`agent-client-protocol = { version = "=%s", features = ["process", "stdio", "unstable_protocol_v2"] }`, locked.Rust.Version))
+	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.toml"), fmt.Sprintf(`agent-client-protocol = { version = "=%s", features = ["process", "stdio", "unstable_protocol_v2", "unstable_mcp_over_acp"] }`, locked.Rust.Version))
 	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "rust-toolchain.toml"), `channel = "1.88.0"`)
 	assertFileContains(t, filepath.Join(repositoryRoot, "interop", "peers", "rust", "Cargo.lock"), fmt.Sprintf(`name = %q
 version = %q

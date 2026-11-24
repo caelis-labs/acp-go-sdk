@@ -16,6 +16,7 @@ pub struct Engine {
     prompt_keys: BTreeMap<String, BTreeMap<String, &'static str>>,
     logged_in: bool,
     config: bool,
+    model: String,
     vectors: Vec<Value>,
 }
 fn invalid() -> Error {
@@ -38,6 +39,7 @@ impl Engine {
             prompt_keys: BTreeMap::new(),
             logged_in: false,
             config: false,
+            model: String::new(),
             vectors,
         }
     }
@@ -96,22 +98,34 @@ impl Engine {
                 done(json!({}))
             }
             "session/set_config_option" => {
+                let id = p["sessionId"].as_str().ok_or_else(invalid)?;
+                if !self.sessions.contains_key(id) {
+                    return Err(self.missing());
+                }
+                if self.version == 1
+                    && p["configId"] == "model"
+                    && p["type"] != "boolean"
+                    && p["value"] == "fast"
+                {
+                    self.model = "fast".into();
+                    self.mutations += 1;
+                    return done(
+                        json!({"configOptions":[{"id":"model","name":"Model","type":"select","currentValue":self.model,"options":[{"value":"fast","name":"Fast"}]}]}),
+                    );
+                }
                 if p["configId"] != "verbose" || p["type"] != "boolean" || !p["value"].is_boolean()
                 {
                     return Err(invalid());
                 };
-                let id = p["sessionId"].as_str().ok_or_else(invalid)?;
-                if !self.sessions.contains_key(id) {
-                    return Err(self.missing());
-                };
                 self.config = p["value"].as_bool().unwrap();
                 self.mutations += 1;
+                let id_field = if self.version == 1 { "id" } else { "configId" };
                 done(
-                    json!({"configOptions":[{"configId":"verbose","name":"Verbose","type":"boolean","currentValue":self.config}]}),
+                    json!({"configOptions":[{(id_field):"verbose","name":"Verbose","type":"boolean","currentValue":self.config}]}),
                 )
             }
             "_interop/inspect" => done(
-                json!({"mutations":self.mutations,"sessions":self.sessions,"foreground":self.foreground,"background":self.background,"requestCancelled":self.request_cancelled,"loggedIn":self.logged_in,"config":self.config}),
+                json!({"mutations":self.mutations,"sessions":self.sessions,"foreground":self.foreground,"background":self.background,"requestCancelled":self.request_cancelled,"loggedIn":self.logged_in,"config":self.config,"model":self.model}),
             ),
             "session/new" | "session/load" | "session/resume" => {
                 if self.version == 2 && method == "session/load" {
@@ -362,6 +376,7 @@ pub fn validate_wire(version: u16, method: &str, params: &Value) -> Result<(), E
             "session/new" => decode!(s::NewSessionRequest),
             "session/load" => decode!(s::LoadSessionRequest),
             "session/resume" => decode!(s::ResumeSessionRequest),
+            "session/set_config_option" => decode!(s::SetSessionConfigOptionRequest),
             _ => Ok(()),
         }
     }
