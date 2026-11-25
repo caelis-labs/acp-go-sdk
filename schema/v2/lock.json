@@ -1,10 +1,10 @@
 {
   "repository": "https://github.com/agentclientprotocol/agent-client-protocol",
-  "tag": "schema-v2.0.0-beta.3",
-  "tagObject": "1d4331bb72848d0b925f6e46d38df62dfb033d86",
-  "commit": "94824f11ec78f7a6699323a9342e47fa5edf2530",
+  "tag": "schema-v2.0.0-beta.4",
+  "tagObject": "adb474a1896966f1289bbbe166f033a78dcaa411",
+  "commit": "840484ff59b3deb1314d1a74e351cd16ef052b30",
   "assets": {
     "meta.json": "5eac58a28615d399af1db8e3d636767a7e404f2df38c9668a1ba00b1989e0714",
-    "schema.json": "48b0a9298527adf35d6ac217f9894fb716e93a17a8eca69eea7f26874dd42c0b"
+    "schema.json": "86dae71cce55d412b927383cb3838ea560bdbf683ea8903bede75785fc79c494"
   }
 }

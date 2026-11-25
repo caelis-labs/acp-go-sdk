@@ -52,6 +52,7 @@ type Engine struct {
 	History            map[string][]Object
 	LoggedIn           bool
 	Config             bool
+	Model              string
 	updates            []Object
 }
 
@@ -105,23 +106,40 @@ func (e *Engine) Handle(method string, p Object) (any, []Object, *acp.RequestErr
 		e.LoggedIn = false
 		return Object{}, nil, nil
 	case "session/set_config_option":
-		value, ok := p["value"].(bool)
-		if p["configId"] != "verbose" || p["type"] != "boolean" || !ok {
-			return nil, nil, invalid()
-		}
 		id, _ := p["sessionId"].(string)
 		if e.Sessions[id] == nil {
 			return nil, nil, e.missing()
 		}
-		e.Config = value
+		var option Object
+		switch value := p["value"].(type) {
+		case bool:
+			if p["configId"] != "verbose" || p["type"] != "boolean" {
+				return nil, nil, invalid()
+			}
+			e.Config = value
+			option = Object{"id": "verbose", "name": "Verbose", "type": "boolean", "currentValue": value}
+			if e.Version == 2 {
+				delete(option, "id")
+				option["configId"] = "verbose"
+			}
+		case string:
+			if e.Version != 1 || p["configId"] != "model" || p["type"] == "boolean" || value != "fast" {
+				return nil, nil, invalid()
+			}
+			e.Model = value
+			option = Object{"id": "model", "name": "Model", "type": "select", "currentValue": value,
+				"options": []any{Object{"value": "fast", "name": "Fast"}}}
+		default:
+			return nil, nil, invalid()
+		}
 		e.Mutations++
-		return Object{"configOptions": []any{Object{"configId": "verbose", "name": "Verbose", "type": "boolean", "currentValue": value}}}, nil, nil
+		return Object{"configOptions": []any{option}}, nil, nil
 	case "_interop/inspect":
 		snapshot := map[string]Session{}
 		for id, s := range e.Sessions {
 			snapshot[id] = *s
 		}
-		return Object{"mutations": e.Mutations, "sessions": snapshot, "foreground": e.Foreground, "background": e.Background, "requestCancelled": e.RequestCancelled, "loggedIn": e.LoggedIn, "config": e.Config}, nil, nil
+		return Object{"mutations": e.Mutations, "sessions": snapshot, "foreground": e.Foreground, "background": e.Background, "requestCancelled": e.RequestCancelled, "loggedIn": e.LoggedIn, "config": e.Config, "model": e.Model}, nil, nil
 	case "session/new", "session/load", "session/resume":
 		if e.Version == 2 && method == "session/load" {
 			return nil, nil, acp.NewMethodNotFound(method)
@@ -329,6 +347,8 @@ func Decode(version int, method string, raw json.RawMessage) (Object, *acp.Reque
 			target = new(acp.LoadSessionRequest)
 		case "session/resume":
 			target = new(acp.ResumeSessionRequest)
+		case "session/set_config_option":
+			target = new(acp.SetSessionConfigOptionRequest)
 		}
 	}
 	if target != nil {

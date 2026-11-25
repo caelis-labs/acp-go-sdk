@@ -963,7 +963,7 @@ type AuthMethodTerminalInline struct {
 	Env []EnvVariable `json:"env,omitempty"`
 	// Unique identifier for this authentication method.
 	MethodId AuthMethodId `json:"methodId"`
-	// Human-readable name of the authentication method.
+	// Human-readable name of the authentication method, shown to users as plain text.
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
@@ -1045,7 +1045,7 @@ type AuthMethodAgentInline struct {
 	Description *string `json:"description,omitempty"`
 	// Unique identifier for this authentication method.
 	MethodId AuthMethodId `json:"methodId"`
-	// Human-readable name of the authentication method.
+	// Human-readable name of the authentication method, shown to users as plain text.
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
@@ -1391,7 +1391,7 @@ type AuthMethodAgent struct {
 	Description *string `json:"description,omitempty"`
 	// Unique identifier for this authentication method.
 	MethodId AuthMethodId `json:"methodId"`
-	// Human-readable name of the authentication method.
+	// Human-readable name of the authentication method, shown to users as plain text.
 	Name string `json:"name"`
 }
 
@@ -1476,7 +1476,7 @@ type AuthMethodTerminal struct {
 	Env []EnvVariable `json:"env,omitempty"`
 	// Unique identifier for this authentication method.
 	MethodId AuthMethodId `json:"methodId"`
-	// Human-readable name of the authentication method.
+	// Human-readable name of the authentication method, shown to users as plain text.
 	Name string `json:"name"`
 }
 
@@ -1549,7 +1549,7 @@ type AvailableCommandCommand struct {
 	//
 	// Omitted and 'null' are equivalent and mean the command takes no input.
 	Input *AvailableCommandInput `json:"input,omitempty"`
-	// Command name without the leading '/' (e.g., 'create_plan', 'research_codebase').
+	// Plain-text command name without the leading '/', such as 'create_plan' or 'research_codebase'.
 	//
 	// MUST NOT contain whitespace and MUST be unique within the command list.
 	Name string `json:"name"`
@@ -1825,7 +1825,8 @@ type AvailableCommandInputText struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// A hint to display when the input hasn't been provided yet
+	// Plain-text hint about the input the command expects. The Client can display it
+	// when the user hasn't provided input yet.
 	Hint string `json:"hint"`
 	Type string `json:"type"`
 }
@@ -2760,11 +2761,11 @@ type BooleanPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *bool `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -3761,7 +3762,7 @@ type Command struct {
 	//
 	// Omitted and 'null' are equivalent and mean the command takes no input.
 	Input *AvailableCommandInput `json:"input,omitempty"`
-	// Command name without the leading '/' (e.g., 'create_plan', 'research_codebase').
+	// Plain-text command name without the leading '/', such as 'create_plan' or 'research_codebase'.
 	//
 	// MUST NOT contain whitespace and MUST be unique within the command list.
 	Name string `json:"name"`
@@ -3987,7 +3988,7 @@ type CompactionUpdate struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The Agent-owned ID of this compaction, unique within the session.
 	CompactionId CompactionId `json:"compactionId"`
-	// Human-readable error details for the compaction.
+	// Human-readable details of a compaction error, in plain text.
 	Error *string `json:"error,omitempty"`
 	// Current lifecycle status.
 	//
@@ -4420,6 +4421,7 @@ func (v *Content) UnmarshalJSON(b []byte) error {
 // Text content. May be plain text or formatted with Markdown.
 //
 // All Agents MUST support text content blocks in prompts.
+// Clients SHOULD join adjacent text blocks without a separator before rendering.
 // Clients SHOULD render this text as CommonMark and MAY support GitHub Flavored Markdown
 // extensions.
 type ContentBlockText struct {
@@ -4433,7 +4435,7 @@ type ContentBlockText struct {
 	//
 	// Omitted and 'null' are equivalent and mean no annotations are provided.
 	Annotations *Annotations `json:"annotations,omitempty"`
-	// Text payload carried by this content block.
+	// Text payload carried by this content block. It may be plain text or Markdown.
 	Text string `json:"text"`
 	Type string `json:"type"`
 }
@@ -4676,7 +4678,8 @@ type ContentBlockResourceLink struct {
 	//
 	// Omitted and 'null' are equivalent and mean no annotations are provided.
 	Annotations *Annotations `json:"annotations,omitempty"`
-	// Optional human-readable details shown with this protocol object.
+	// Optional human-readable description shown with the link. It describes the resource
+	// contents in plain text.
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -4688,13 +4691,13 @@ type ContentBlockResourceLink struct {
 	//
 	// Omitted and 'null' are equivalent and mean the MIME type is not specified.
 	MimeType *MediaType `json:"mimeType,omitempty"`
-	// Human-readable name shown for this protocol object.
+	// Human-readable name shown for the linked resource, in plain text.
 	Name string `json:"name"`
 	// Optional size of the linked resource in bytes, if known.
 	//
 	// Omitted and 'null' are equivalent and mean the size is not known.
 	Size *uint64 `json:"size,omitempty"`
-	// Optional display title for end-user UI.
+	// Optional plain-text display title for the resource, intended for end users.
 	//
 	// Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -4893,6 +4896,7 @@ type ContentBlock struct {
 	// Text content. May be plain text or formatted with Markdown.
 	//
 	// All Agents MUST support text content blocks in prompts.
+	// Clients SHOULD join adjacent text blocks without a separator before rendering.
 	// Clients SHOULD render this text as CommonMark and MAY support GitHub Flavored Markdown
 	// extensions.
 	Text *ContentBlockText `json:"-"`
@@ -5435,7 +5439,7 @@ type CreateElicitationForm struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// A human-readable message describing what input is needed.
+	// A plain-text message explaining to the user what the Agent needs and why.
 	Message string `json:"message"`
 	Mode    string `json:"mode"`
 	// The pending Client-to-Agent request this elicitation is tied to.
@@ -5512,7 +5516,7 @@ type CreateElicitationUrl struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The unique identifier for this elicitation.
 	ElicitationId ElicitationId `json:"elicitationId"`
-	// A human-readable message describing what input is needed.
+	// A plain-text message explaining to the user what the Agent needs and why.
 	Message string `json:"message"`
 	Mode    string `json:"mode"`
 	// The pending Client-to-Agent request this elicitation is tied to.
@@ -8072,7 +8076,7 @@ type ElicitationPropertySchemaString struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *string `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -8098,7 +8102,7 @@ type ElicitationPropertySchemaString struct {
 	// Optional. Omitted and 'null' are equivalent and mean no titled single-select choices are
 	// declared by 'oneOf'.
 	OneOf []EnumOption `json:"oneOf,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -8185,7 +8189,7 @@ type ElicitationPropertySchemaNumber struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *float64 `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -8197,7 +8201,7 @@ type ElicitationPropertySchemaNumber struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean there is no inclusive lower bound.
 	Minimum *float64 `json:"minimum,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -8272,7 +8276,7 @@ type ElicitationPropertySchemaInteger struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *int64 `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -8284,7 +8288,7 @@ type ElicitationPropertySchemaInteger struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean there is no inclusive lower bound.
 	Minimum *int64 `json:"minimum,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -8359,11 +8363,11 @@ type ElicitationPropertySchemaBoolean struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *bool `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -8438,7 +8442,7 @@ type ElicitationPropertySchemaArray struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default selections are provided.
 	Default []string `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -8452,7 +8456,7 @@ type ElicitationPropertySchemaArray struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean there is no minimum selection count.
 	MinItems *uint64 `json:"minItems,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -8881,7 +8885,7 @@ type ElicitationSchema struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Optional description of what this schema represents.
+	// Optional plain-text description of what the form asks the user to provide.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no schema description is provided.
 	Description *string `json:"description,omitempty"`
@@ -8891,7 +8895,7 @@ type ElicitationSchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no property names are required.
 	Required []string `json:"required,omitempty"`
-	// Optional title for the schema.
+	// Optional plain-text title for the form as a whole.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -9615,11 +9619,11 @@ type EnumOption struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The constant value for this option.
 	Const string `json:"const"`
-	// Human-readable description.
+	// Plain-text description to help the user choose between options.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
-	// Human-readable title for this option.
+	// Human-readable title for this choice, in plain text. 'const' holds the corresponding value.
 	Title string `json:"title"`
 }
 
@@ -9749,8 +9753,8 @@ type Error struct {
 	// define a shape: ['UnsupportedProtocolVersionErrorData'] for '-32022', and
 	// ['SessionNotFoundErrorData'] for '-32002' when a session is not found.
 	Data *ErrorData `json:"data,omitempty"`
-	// A string providing a short description of the error.
-	// The message SHOULD be limited to a concise single sentence.
+	// A short, human-readable description of the error, in plain text.
+	// The sender SHOULD limit the message to a single concise sentence.
 	Message string `json:"message"`
 }
 
@@ -11504,15 +11508,14 @@ type Implementation struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Intended for programmatic or logical use, but can be used as a display
-	// name fallback if title isn't present.
+	// Name intended for programmatic or logical use. It can also serve as the
+	// plain-text display name when 'title' is absent.
 	Name string `json:"name"`
-	// Intended for UI and end-user contexts and optimized to be human-readable
-	// and easily understood.
+	// Optional human-readable title chosen to make the implementation easy to
+	// recognize in the user interface. The title is plain text.
 	//
-	// If not provided, the name SHOULD be used for display.
-	//
-	// Omitted and 'null' are equivalent and mean the 'name' is used for display.
+	// Omission and 'null' are equivalent. When displaying an implementation without a title,
+	// the receiver SHOULD use 'name'.
 	Title *string `json:"title,omitempty"`
 	// Version of the implementation. Can be displayed to the user or used
 	// for debugging or metrics purposes. (e.g. "1.0.0").
@@ -11786,7 +11789,7 @@ type IntegerPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *int64 `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -11798,7 +11801,7 @@ type IntegerPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean there is no inclusive lower bound.
 	Minimum *int64 `json:"minimum,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -13230,7 +13233,7 @@ type MultiSelectPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default selections are provided.
 	Default []string `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -13244,7 +13247,7 @@ type MultiSelectPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean there is no minimum selection count.
 	MinItems *uint64 `json:"minItems,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -13629,7 +13632,7 @@ type NumberPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *float64 `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -13641,7 +13644,7 @@ type NumberPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean there is no inclusive lower bound.
 	Minimum *float64 `json:"minimum,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -13704,7 +13707,7 @@ type PermissionOption struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// What selecting this option means. Clients can also use it to choose how to display the option.
 	Kind PermissionOptionKind `json:"kind"`
-	// Human-readable label to display to the user.
+	// Human-readable label for this choice, shown to the user as plain text.
 	Name string `json:"name"`
 	// Identifier for this permission option. MUST be unique within the request.
 	OptionId PermissionOptionId `json:"optionId"`
@@ -15664,7 +15667,7 @@ type RequestPermissionRequest struct {
 	//
 	// Omitted and 'null' are equivalent and mean no structured subject was provided.
 	Subject *RequestPermissionSubject `json:"subject,omitempty"`
-	// Human-readable title for the permission prompt.
+	// Human-readable title shown with the permission prompt, in plain text.
 	//
 	// This title is specific to the permission prompt and does not update any
 	// subject's displayed title.
@@ -16261,7 +16264,8 @@ type ResourceLink struct {
 	//
 	// Omitted and 'null' are equivalent and mean no annotations are provided.
 	Annotations *Annotations `json:"annotations,omitempty"`
-	// Optional human-readable details shown with this protocol object.
+	// Optional human-readable description shown with the link. It describes the resource
+	// contents in plain text.
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -16273,13 +16277,13 @@ type ResourceLink struct {
 	//
 	// Omitted and 'null' are equivalent and mean the MIME type is not specified.
 	MimeType *MediaType `json:"mimeType,omitempty"`
-	// Human-readable name shown for this protocol object.
+	// Human-readable name shown for the linked resource, in plain text.
 	Name string `json:"name"`
 	// Optional size of the linked resource in bytes, if known.
 	//
 	// Omitted and 'null' are equivalent and mean the size is not known.
 	Size *uint64 `json:"size,omitempty"`
-	// Optional display title for end-user UI.
+	// Optional plain-text display title for the resource, intended for end users.
 	//
 	// Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -16985,7 +16989,7 @@ type SessionConfigOptionSelect struct {
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
-	// Human-readable label for the option.
+	// Human-readable label the Client can display for the option, in plain text.
 	Name string `json:"name"`
 	// The set of selectable options. MUST contain at least one value, and each 'value' MUST be
 	// unique within the option, including across groups.
@@ -17081,7 +17085,7 @@ type SessionConfigOptionBoolean struct {
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
-	// Human-readable label for the option.
+	// Human-readable label the Client can display for the option, in plain text.
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
@@ -17514,7 +17518,7 @@ type SessionConfigSelectGroup struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// Identifier for this group. MUST be unique within the option.
 	GroupId SessionConfigGroupId `json:"groupId"`
-	// Human-readable label for this group.
+	// Human-readable label the Client can display as a plain-text group header.
 	Name string `json:"name"`
 	// The set of option values in this group. MUST contain at least one value.
 	Options []SessionConfigSelectOption `json:"options"`
@@ -17608,7 +17612,7 @@ type SessionConfigSelectOption struct {
 	//
 	// Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
-	// Human-readable label for this option value.
+	// Human-readable label the Client can display for this option value, in plain text.
 	Name string `json:"name"`
 	// Unique identifier for this option value.
 	Value SessionConfigValueId `json:"value"`
@@ -17886,7 +17890,7 @@ type SessionInfo struct {
 	Cwd AbsolutePath `json:"cwd"`
 	// Unique identifier for the session
 	SessionId SessionId `json:"sessionId"`
-	// Human-readable title for the session
+	// Human-readable title for the session, in plain text.
 	//
 	// Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -17995,7 +17999,7 @@ type SessionInfoUpdate struct {
 	//
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// Human-readable title for the session. Set to null to clear.
+	// Human-readable title for the session, in plain text. Set to 'null' to clear.
 	Title *string `json:"title,omitempty"`
 	// RFC 3339 timestamp of last activity. Set to null to clear.
 	UpdatedAt    *string `json:"updatedAt,omitempty"`
@@ -21104,7 +21108,7 @@ type SessionSessionInfoUpdate struct {
 	// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
 	Meta          map[string]json.RawMessage `json:"_meta,omitempty"`
 	SessionUpdate string                     `json:"sessionUpdate"`
-	// Human-readable title for the session. Set to null to clear.
+	// Human-readable title for the session, in plain text. Set to 'null' to clear.
 	Title *string `json:"title,omitempty"`
 	// RFC 3339 timestamp of last activity. Set to null to clear.
 	UpdatedAt    *string `json:"updatedAt,omitempty"`
@@ -21574,7 +21578,7 @@ type SessionCompactionUpdate struct {
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
 	// The Agent-owned ID of this compaction, unique within the session.
 	CompactionId CompactionId `json:"compactionId"`
-	// Human-readable error details for the compaction.
+	// Human-readable details of a compaction error, in plain text.
 	Error         *string `json:"error,omitempty"`
 	SessionUpdate string  `json:"sessionUpdate"`
 	// Current lifecycle status.
@@ -21998,7 +22002,7 @@ type SessionSubagentUpdate struct {
 	// current report and leaves activity unconfirmed (not idle or cancelled).
 	// A concrete 'StateUpdate' replaces the entire previous snapshot.
 	State *StateUpdate `json:"state,omitempty"`
-	// The parent's human-readable display title for this child. It need not be unique.
+	// The parent's human-readable display title for this child, in plain text. It need not be unique.
 	//
 	// Optional and nullable. Omitted means unchanged. 'null' clears it. If no
 	// title is set, the Client chooses a fallback presentation.
@@ -25698,7 +25702,7 @@ type StringPropertySchema struct {
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no default value is provided.
 	Default *string `json:"default,omitempty"`
-	// Human-readable description.
+	// Plain-text help for the user filling out this field.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no description is provided.
 	Description *string `json:"description,omitempty"`
@@ -25724,7 +25728,7 @@ type StringPropertySchema struct {
 	// Optional. Omitted and 'null' are equivalent and mean no titled single-select choices are
 	// declared by 'oneOf'.
 	OneOf []EnumOption `json:"oneOf,omitempty"`
-	// Optional title for the property.
+	// Optional plain-text label for this field in the form.
 	//
 	// Optional. Omitted and 'null' are equivalent and mean no title is provided.
 	Title *string `json:"title,omitempty"`
@@ -25917,7 +25921,7 @@ type SubagentUpdate struct {
 	// current report and leaves activity unconfirmed (not idle or cancelled).
 	// A concrete 'StateUpdate' replaces the entire previous snapshot.
 	State *StateUpdate `json:"state,omitempty"`
-	// The parent's human-readable display title for this child. It need not be unique.
+	// The parent's human-readable display title for this child, in plain text. It need not be unique.
 	//
 	// Optional and nullable. Omitted means unchanged. 'null' clears it. If no
 	// title is set, the Client chooses a fallback presentation.
@@ -27259,7 +27263,8 @@ type TextCommandInput struct {
 	//
 	// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
 	Meta map[string]json.RawMessage `json:"_meta,omitempty"`
-	// A hint to display when the input hasn't been provided yet
+	// Plain-text hint about the input the command expects. The Client can display it
+	// when the user hasn't provided input yet.
 	Hint string `json:"hint"`
 }
 
@@ -27310,7 +27315,7 @@ type TextContent struct {
 	//
 	// Omitted and 'null' are equivalent and mean no annotations are provided.
 	Annotations *Annotations `json:"annotations,omitempty"`
-	// Text payload carried by this content block.
+	// Text payload carried by this content block. It may be plain text or Markdown.
 	Text string `json:"text"`
 }
 
@@ -27368,7 +27373,7 @@ type TextResourceContents struct {
 	//
 	// Omitted and 'null' are equivalent and mean the MIME type is not specified.
 	MimeType *MediaType `json:"mimeType,omitempty"`
-	// Text payload carried by this content block.
+	// The contents of the resource. Its 'mimeType', when provided, describes the format.
 	Text string `json:"text"`
 	// URI associated with this resource or media payload.
 	Uri string `json:"uri"`

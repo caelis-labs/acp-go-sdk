@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -73,6 +74,65 @@ func TestAgentDispatchRejectsMissingRequiredProperties(t *testing.T) {
 }
 
 var _ Agent = minimalAgent{}
+
+type configAgent struct {
+	minimalAgent
+	calls chan SetSessionConfigOptionRequest
+}
+
+func (a configAgent) SetSessionConfigOption(_ context.Context, request SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error) {
+	a.calls <- request
+	return SetSessionConfigOptionResponse{ConfigOptions: []SessionConfigOption{}}, nil
+}
+
+func TestSetSessionConfigOptionWireVariants(t *testing.T) {
+	agentStream, clientStream := net.Pipe()
+	calls := make(chan SetSessionConfigOptionRequest, 4)
+	agent := NewAgentSideConnection(configAgent{calls: calls}, agentStream, agentStream)
+	t.Cleanup(func() { _ = agent.Close() })
+	client := NewClientSideConnection(nil, clientStream, clientStream)
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	for _, value := range []bool{true, false} {
+		request := SetSessionConfigOptionRequest{Boolean: &SetSessionConfigOptionBoolean{
+			SessionId: "s", ConfigId: "verbose", Value: value,
+		}}
+		if _, err := client.SetSessionConfigOption(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+		received := <-calls
+		if received.Boolean == nil || received.Boolean.Value != value || received.ValueId != nil {
+			t.Fatalf("unexpected boolean variant: %+v", received)
+		}
+	}
+	request := SetSessionConfigOptionRequest{ValueId: &SetSessionConfigOptionValueId{
+		SessionId: "s", ConfigId: "model", Value: "fast",
+	}}
+	if _, err := client.SetSessionConfigOption(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	received := <-calls
+	if received.ValueId == nil || received.ValueId.Value != "fast" || received.Boolean != nil {
+		t.Fatalf("unexpected string-ID variant: %+v", received)
+	}
+
+	for _, params := range []json.RawMessage{
+		json.RawMessage(`{"sessionId":"s","configId":"model","type":"boolean","value":"fast"}`),
+		json.RawMessage(`{"sessionId":"s","configId":"verbose","type":"boolean","value":null}`),
+		json.RawMessage(`{"sessionId":"s","configId":"verbose","value":false}`),
+	} {
+		_, err := SendRequest[SetSessionConfigOptionResponse](client.conn, ctx, AgentMethodSessionSetConfigOption, params)
+		var remote *RequestError
+		if !errors.As(err, &remote) || remote.Code != -32602 {
+			t.Fatalf("%s: expected Invalid params, got %v", params, err)
+		}
+	}
+	if len(calls) != 0 {
+		t.Fatal("invalid requests reached the agent")
+	}
+}
 
 type concurrentPromptAgent struct {
 	calls    atomic.Int32

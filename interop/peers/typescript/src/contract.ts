@@ -50,6 +50,7 @@ class Engine {
   requestCancelled = false;
   loggedIn = false;
   config = false;
+  model = "";
   reject(): never {
     throw sdk.RequestError.invalidParams("contract fixture rejected request");
   }
@@ -110,19 +111,27 @@ class Engine {
       return done();
     }
     if (method === "session/set_config_option") {
+      if (!this.sessions[p.sessionId]) this.missing();
+      if (version === 1 && p.configId === "model" && p.type !== "boolean" && p.value === "fast") {
+        this.model = p.value;
+        this.mutations++;
+        return done({ configOptions: [{
+          id: "model", name: "Model", type: "select", currentValue: this.model,
+          options: [{ value: "fast", name: "Fast" }],
+        }] });
+      }
       if (
         p.configId !== "verbose" ||
         p.type !== "boolean" ||
         typeof p.value !== "boolean"
       )
         this.reject();
-      if (!this.sessions[p.sessionId]) this.missing();
       this.config = p.value;
       this.mutations++;
       return done({
         configOptions: [
           {
-            configId: "verbose",
+            [version === 1 ? "id" : "configId"]: "verbose",
             name: "Verbose",
             type: "boolean",
             currentValue: this.config,
@@ -139,6 +148,7 @@ class Engine {
         requestCancelled: this.requestCancelled,
         loggedIn: this.loggedIn,
         config: this.config,
+        model: this.model,
       });
     if (["session/new", "session/load", "session/resume"].includes(method)) {
       if (p.replayFrom && p.replayFrom.type !== "start") this.reject();
@@ -318,6 +328,7 @@ const methods = [
   "session/new",
   "session/resume",
   "session/list",
+  "session/set_config_option",
   "_interop/inspect",
   "_interop/flush",
   ...(version === 1
@@ -330,7 +341,6 @@ const methods = [
         "terminal/cancel",
         "auth/login",
         "auth/logout",
-        "session/set_config_option",
       ]),
 ];
 async function main() {

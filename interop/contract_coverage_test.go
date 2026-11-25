@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/internal/interoptest/contract"
 )
 
-var contractCaseNames = []string{"v1-full", "v1-append", "v1-null", "v1-omitted", "v2-full", "v2-append", "v2-null", "v2-omitted", "v2-no-session", "v2-null-session", "v2-lifecycle", "v2-after", "v2-newer", "v2-content"}
+var contractCaseNames = []string{"v1-full", "v1-append", "v1-null", "v1-omitted", "v1-config", "v2-full", "v2-append", "v2-null", "v2-omitted", "v2-no-session", "v2-null-session", "v2-lifecycle", "v2-after", "v2-newer", "v2-content"}
 
 func TestContractCasesCoverPinnedSurface(t *testing.T) {
 	dir := filepath.Join(repositoryRoot, "interop/contract")

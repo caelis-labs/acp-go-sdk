@@ -1,0 +1,17 @@
+{
+  "name": "v1-config",
+  "version": 1,
+  "profile": "full",
+  "steps": [
+    {"method": "initialize", "params": {"protocolVersion": 1}, "expect": {"protocolVersion": 1}},
+    {"method": "session/new", "params": {"cwd": "/tmp", "mcpServers": []}, "expect": {"sessionId": "s1"}},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "verbose", "type": "boolean", "value": true}, "expect": {"configOptions": [{"id": "verbose", "type": "boolean", "currentValue": true}]}},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "verbose", "type": "boolean", "value": false}, "expect": {"configOptions": [{"id": "verbose", "type": "boolean", "currentValue": false}]}},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "model", "value": "fast"}, "expect": {"configOptions": [{"id": "model", "type": "select", "currentValue": "fast"}]}},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "model", "type": "future", "value": "fast"}, "expect": {"configOptions": [{"id": "model", "type": "select", "currentValue": "fast"}]}},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "model", "type": "boolean", "value": "fast"}, "error": -32602},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "verbose", "type": "boolean", "value": "true"}, "error": -32602},
+    {"method": "session/set_config_option", "params": {"sessionId": "s1", "configId": "verbose", "value": true}, "error": -32602},
+    {"method": "_interop/inspect", "params": {}, "expect": {"mutations": 5, "config": false, "model": "fast"}}
+  ]
+}

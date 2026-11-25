@@ -11,6 +11,7 @@ MCP commands, tools or terminal commands.
 | --- | --- | --- | --- |
 | Conversation, permission, notices/compaction, plans/subagents, empty params, session/request cancellation | v1 | Four directions × three scenarios | 12 |
 | System prompt lifecycle and capability contracts | v1 | Four directions × four capability profiles | 16 |
+| Boolean and string-ID configuration writes | v1 | Four directions | 4 |
 | System prompt lifecycle and capability contracts | v2 | Four directions × four capability profiles | 16 |
 | Omitted/null session capability | v2 | Four directions × two profiles | 8 |
 | Lifecycle, auth/config, reverse calls, states and cancellation | v2 | Four directions | 4 |
@@ -18,7 +19,8 @@ MCP commands, tools or terminal commands.
 | Version negotiation / repeated initialize window | v2 | Four directions | 4 |
 | Baseline content and unsupported content rejection | v2 | Four directions | 4 |
 | Invalid-envelope and unsupported-method wire probes | v2 | Go, TypeScript and Rust agents × seven probes | 21 |
-| **Total** | | | **89** |
+| MCP-over-ACP attribution, admission and pre-forward cancellation | v1 unstable and v2 unstable | Two SDK providers and the TypeScript bridge per wire profile | 6 |
+| **Total** | | | **99** |
 
 The four system prompt profiles advertise override, append only, omitted support,
 or explicit null support. V1 exercises new/load/resume; v2 exercises new/resume
@@ -33,6 +35,9 @@ that choice belongs to the application, not the SDK.
 The v1 conversation case advertises plan and subagent capabilities and checks a
 Markdown plan replacement, plan removal, and a child-session announcement in
 all four directions. The fixture does not start a child session.
+The four v1 configuration cases exercise true and false, the default
+string-ID payload, and the unknown-type string fallback. A string under an
+explicit boolean discriminator is rejected with `-32602` before mutation.
 
 The v2 lifecycle case exercises all 13 agent methods in the pinned non-unstable
 schema, all four client methods, and every known session-update discriminator.
@@ -60,14 +65,30 @@ notifications after a prompt response so both legal response/update orderings
 are exercised. The extensions `_interop/inspect` and `_interop/flush` exist only
 in these test agents and never enter generated ACP objects or the stable API.
 
-TypeScript 2.9.1 uses its default v1 entrypoint and, separately,
-`@agentclientprotocol/sdk/experimental/v2`. Rust 5.5.1 explicitly uses `.v1()`
-and `.v2()`, with `unstable_protocol_v2` enabled only in the peer dependency.
-No additional unstable feature set is enabled. SDK package majors do not choose
-the ACP wire major. Go contract peers use the bounded connection API, v2's
-protocol router and generated payload decoders; high-level v2 helpers also have
-Go loopback coverage. This suite does not claim to test every SDK convenience
-wrapper.
+TypeScript 2.12.0 uses its default v1 entrypoint and, separately,
+`@agentclientprotocol/sdk/experimental/v2`. Rust 5.6.0 explicitly uses `.v1()`
+and `.v2()`, with `unstable_protocol_v2` and `unstable_mcp_over_acp` enabled in
+the peer dependency. The core tests keep their existing capabilities. SDK package
+majors do not choose the ACP wire major. Go contract peers use the bounded
+connection API, v2's protocol router and generated payload decoders. High-level
+v2 helpers also have Go loopback coverage.
+
+The MCP-over-ACP probes explicitly opt into the two unstable TypeScript
+entrypoints and Rust's MCP feature. Go uses the generic connection API to
+exchange `mcp/message` with those peers. Each provider accepts the announced
+child of the session that declared the server. An absent or null session, an
+unannounced child, or the wrong session is rejected before execution. A tool ID
+is usable for correlation even when unreported or repeated, and provides no
+admission on its own. The TypeScript loopback HTTP bridge aborts its attribution
+lookup when the caller disconnects. A provider-side trace verifies that the
+abandoned operation is absent even after the child is announced and the lookup
+settles. A later call succeeds on the same connection.
+
+The bridge case checks parent-versus-child attribution. The SDK provider
+cases check an unrelated session with the same tool ID. In Rust SDK 5.6.0,
+the v1 session builder can deliver MCP requests attributed to its active
+parent to the general session update stream before the MCP provider sees
+them. The fixture does not assert admission of that Rust v1 path.
 
 Official v2 clients pin outgoing initialize to their configured v2 profile.
 The lower-version rejection probe therefore uses raw NDJSON, rather than claim
@@ -95,9 +116,10 @@ suite and `quality` requires its success. CI uploads the dependency locks and
 all reports under `.artifacts/interop/`:
 
 - `evidence.json`: the original 12 stable v1 conversation/cancellation cases;
-- `contract-evidence.json`: all 56 versioned contract cases, fixture SHA256s,
+- `contract-evidence.json`: all 60 versioned contract cases, fixture SHA256s,
   schema/SDK identities, toolchains, head commit and per-step/reverse-call traces;
-- `wire-v2-evidence.json`: all 21 receiver probes and observed error envelopes.
+- `wire-v2-evidence.json`: all 21 receiver probes and observed error envelopes;
+- `mcp-experimental-evidence.json`: the six opt-in MCP cases.
 
 All reports distinguish complete success from failure, and record commit and
 working-tree state. Use `ACP_INTEROP_EVIDENCE_DIR` to change their destination.
@@ -108,10 +130,12 @@ package lock and Cargo.lock; Rust stays pinned to 1.88.0.
 
 “Complete” means every cell and assertion in the table above, not a proof of
 all protocol permutations or all third-party agents. The matrix uses Linux
-stdio and bounded deterministic test applications. Native Windows Go stdio
-has a separate CI job; external SDK matrices are not run on Windows. The suite
-does not execute models, OAuth/browser login, MCP servers, actual tool commands,
-real terminals, HTTP/SSE/WebSocket transports or additional unstable extensions.
+stdio and bounded deterministic test applications. The TypeScript bridge's
+inner MCP HTTP endpoint is local to its fixture process. Native Windows Go
+stdio has a separate CI job. External SDK matrices run on Linux. Real MCP
+servers, ordinary stdio MCP execution, adapter support, models, OAuth/browser
+login, tool and terminal commands, and ACP HTTP/SSE/WebSocket transport are
+outside this suite.
 It does not claim all optional v1 filesystem/terminal/mode methods, every content
 modality, arbitrary unsafe JavaScript numeric IDs, or every recovery/concurrency
 schedule. Go race, fuzz, transport and loopback tests supplement these external

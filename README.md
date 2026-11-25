@@ -13,7 +13,7 @@ Use it independently of Caelis or any particular agent framework.
 - **Both sides of ACP:** implement an [agent](#agent-side), build a
   [client](#client-side-and-subprocesses), and stream session updates with typed Go APIs.
 - **Stable protocol, pinned schema:** ACP wire protocol v1, generated from
-  official `schema-v1.34.1`. [Trace every generated type to its source](#protocol-provenance).
+  official `schema-v1.35.0`. [Trace every generated type to its source](#protocol-provenance).
 - **Tested across languages:** a [four-direction interoperability matrix](#official-sdk-interoperability)
   checks Go clients and agents against the official TypeScript and Rust SDKs.
 - **Predictable resource and process handling:** bounded queues, ordered
@@ -41,7 +41,7 @@ import acp "github.com/caelis-labs/acp-go-sdk"
 
 The Go module release, official schema version, and negotiated wire protocol
 version are separate identities. The install command pins the SDK release;
-`schema-v1.34.1` describes the schema used to generate its ACP v1 types.
+`schema-v1.35.0` describes the schema used to generate its ACP v1 types.
 
 ## Run an agent and client
 
@@ -204,10 +204,10 @@ all optional capabilities or all third-party agents.
 | Identity | Pinned value |
 |---|---|
 | Wire protocol | 1 |
-| Schema artifact | 1.34.1 |
-| Schema tag | schema-v1.34.1 |
-| Upstream commit | 17747b91cd79442e796204b85cad7112bcc876b0 |
-| schema.json SHA256 | 79fbeccc5cb5668259ee35ff7440ffd79eaf813742366ac06f707b98bbf789db |
+| Schema artifact | 1.35.0 |
+| Schema tag | schema-v1.35.0 |
+| Upstream commit | 065b57951b6b2a91ac5eddd249e145d1f6d54545 |
+| schema.json SHA256 | d3ddaefbee593abf74beeda91bdf57b58ef99bf90219dc1cb4ae90be3ba18518 |
 
 The exact tag object, commit, assets, and hashes are recorded in
 schema/lock.json. Generated stable code uses schema/schema.json only;
@@ -220,7 +220,7 @@ queries GitHub releases and opens an `upstream-drift` issue when a pin is
 behind.
 
 Draft ACP v2 lives in `experimental/v2`. It is generated from
-`schema-v2.0.0-beta.3` and is not a stable API. `session/prompt` returns the
+`schema-v2.0.0-beta.4` and is not a stable API. `session/prompt` returns the
 required `messageId` of the user message inserted into the conversation;
 the matching user-message update may arrive before or after that response.
 Running, idle, requires_action, and unknown are `session/update` states. Its typed
@@ -260,8 +260,8 @@ generated `State`, `Set`, `Clear`, and `Unset` methods. See the
 [v1.5.0 migration notes](docs/upgrading-to-v1.5.0.md) for capability policy,
 receiver validation, and the isolated v2 alpha.8 API changes. The
 [October 2026 alignment notes](docs/schema-sdk-alignment-2026-10.md) describe
-schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-22.md)
-cover schema 1.34.1 / v2 beta.3, TypeScript 2.9.1 and Rust 5.5.1.
+schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-24.md)
+cover schema 1.35.0 / v2 beta.4, TypeScript 2.12.0 and Rust 5.6.0.
 The [versioned interop follow-up](docs/versioned-interop-2026-11-13.md) expands
 the verification to both wire profiles and fixes invalid v2 error-envelope IDs.
 
