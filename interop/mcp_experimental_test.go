@@ -251,7 +251,7 @@ func testMCPAdmission(t *testing.T, version int, command stdio.Command) {
 		{"missing session", contract.Object{}, nil},
 		{"null session", contract.Object{"sessionId": nil}, nil},
 		{"tool alone", contract.Object{"toolCallId": "tool-1"}, nil},
-		{"wrong session with same tool", contract.Object{"sessionId": "parent", "toolCallId": "tool-1"}, nil},
+		{"unrelated session with same tool", contract.Object{"sessionId": "foreign", "toolCallId": "tool-1"}, nil},
 		{"unannounced child", contract.Object{"sessionId": "child"}, nil},
 		{"child without tool", contract.Object{"sessionId": "child"}, contract.Object{"sessionId": "child", "toolCallId": nil, "runs": float64(1)}},
 		{"child and an unreported tool", contract.Object{"sessionId": "child", "toolCallId": "tool-1"}, contract.Object{"sessionId": "child", "toolCallId": "tool-1", "runs": float64(2)}},
@@ -287,7 +287,7 @@ func testMCPAdmission(t *testing.T, version int, command stdio.Command) {
 		if probe.want == nil {
 			var remote *acp.RequestError
 			if !errors.As(err, &remote) || remote.Code != -32602 {
-				t.Fatalf("%s: expected outer Invalid params, got %v, %v", probe.name, got, err)
+				t.Fatalf("%s: expected outer Invalid params, got %v, %v\nstderr: %s", probe.name, got, err, stderr.String())
 			}
 		} else {
 			if err != nil {

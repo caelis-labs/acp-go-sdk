@@ -35,3 +35,5 @@ the provider never received the abandoned operation.
 These tests use the published SDKs' experimental entrypoints and test-owned
 routing. The unstable schemas stay outside the generated Go packages. The
 suite covers neither ordinary stdio MCP execution nor a Codex adapter.
+The [interop scope](../interop/README.md) records the Rust v1 active-parent
+session routing limitation found during verification.

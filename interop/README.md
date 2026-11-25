@@ -84,6 +84,12 @@ lookup when the caller disconnects. A provider-side trace verifies that the
 abandoned operation is absent even after the child is announced and the lookup
 settles. A later call succeeds on the same connection.
 
+The bridge case checks parent-versus-child attribution. The SDK provider
+cases check an unrelated session with the same tool ID. In Rust SDK 5.6.0,
+the v1 session builder can deliver MCP requests attributed to its active
+parent to the general session update stream before the MCP provider sees
+them. The fixture does not assert admission of that Rust v1 path.
+
 Official v2 clients pin outgoing initialize to their configured v2 profile.
 The lower-version rejection probe therefore uses raw NDJSON, rather than claim
 that passing `protocolVersion: 1` through those clients sends a v1 handshake.

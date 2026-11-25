@@ -80,14 +80,14 @@ async fn main() -> Result<(), Error> {
                     )
                     .block_task()
                     .await?;
-                    cx.build_session_cwd()?
+                    let _session = cx
+                        .build_session_cwd()?
                         .with_mcp_server(server)?
                         .block_task()
-                        .run_until(async |_| {
-                            cx.send_notification(ready()?)?;
-                            pending().await
-                        })
-                        .await
+                        .start_session()
+                        .await?;
+                    cx.send_notification(ready()?)?;
+                    pending().await
                 })
                 .await
         }
