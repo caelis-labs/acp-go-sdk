@@ -1,5 +1,3 @@
-**English** | [简体中文](README.zh-CN.md)
-
 # ACP Go SDK
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/caelis-labs/acp-go-sdk.svg)](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk)
