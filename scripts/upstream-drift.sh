@@ -15,7 +15,8 @@ fi
 
 gh label create upstream-drift \
   --description "Official ACP protocol or SDK pin is behind upstream" \
-  --color FBCA04 || true
+  --color FBCA04 \
+  --force || true
 
 title=$(jq -r .issueTitle "$RUNNER_TEMP/upstream-drift.json")
 jq -r .issueBody "$RUNNER_TEMP/upstream-drift.json" > "$RUNNER_TEMP/upstream-drift.md"
