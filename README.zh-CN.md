@@ -25,15 +25,15 @@
 
 - **稳定的 `v1` 契约与极简依赖：** 根包 `acp` 为 ACP 线协议 `1` 提供稳定的 `v1` API，整个模块仅有一个外部依赖（[`golang.org/x/sys`](go.mod)）。`schema.unstable.json` 与草案 `experimental/v2` 与稳定根包严格隔离。
 - **紧跟官方协议与全自动上游漂移追踪：** 类型与分发器由 [`schema/lock.json`](schema/lock.json) 中固定的官方 Schema 确定性生成并通过 SHA256 校验。每日定时 GitHub Action（[`upstream-drift.yml`](.github/workflows/upstream-drift.yml)）会自动巡检官方 `schema-v1*`、`schema-v2*` 以及官方 TypeScript / Rust SDK 新版本，一旦落后立即自动创建或更新 `upstream-drift` Issue；`make verify-upstream` 在 CI 中强制校验文档与锁文件零漂移。
-- **发版门禁级官方 TypeScript / Rust 互操作验证：** 每次发版前必须通过覆盖 **v1 与 v2 双协议版本**、共 **99 个测试用例**的真实进程互操作门禁，对标 [`upstream/lock.json`](upstream/lock.json) 实时追踪的官方 TypeScript 与 Rust SDK，并产出可审计的机器可读证据报告。
+- **发版门禁级官方 TypeScript / Rust 互操作验证：** 每次发版前必须通过覆盖 **v1 与 v2 双协议版本**、共 **99 个测试用例**的真实进程互操作门禁，对标 [`upstream/lock.json`](upstream/lock.json) 中固定并持续跟踪的官方 TypeScript 与 Rust SDK，并产出可审计的机器可读证据报告。
 - **生产级有界并发与背压控制：** 对帧大小（`10 MiB`）、在途请求数（`1024`）、并发处理器（`32`）和有序通知队列（`1024` 条 / `32 MiB`）提供默认上限；支持无精度损失的字符串/数字请求 ID、`$/cancel_request` 以及 JSON-RPC `-32800` 取消语义。
 - **可靠的跨平台 `stdio` 子进程治理：** 直接启动可执行文件（绝不经过隐式 shell），持续排空子进程 `stderr` 防止管道阻塞，独立复制进程 `stdin`/`stdout` 句柄；提供幂等 `Close` 与优雅 `Shutdown(ctx)`，支持 Unix 进程组与 Windows kill-on-close Job Object 进程树回收（且无控制台弹窗）。
 
 ```mermaid
 flowchart LR
     Client["Client 应用 (编辑器 / CLI)"] -->|"Initialize / NewSession / Prompt"| ClientConn["acp.ClientSideConnection"]
+    ClientConn -->|"SessionUpdate / RequestPermission / fs / terminal"| Client
     ClientConn <-->|"transport/stdio (NDJSON · stderr 排空 · 进程树回收)"| AgentConn["acp.AgentSideConnection"]
-    AgentConn -->|"SessionUpdate / RequestPermission / fs / terminal"| Client
     AgentConn <-->|"强类型 Go Handler"| Agent["Agent 应用 (模型 / 工具)"]
 ```
 
@@ -117,41 +117,48 @@ func main() {
 实现 `acp.Client`（`RequestPermission`、`SessionUpdate`），通过 `stdio.StartClient` 拉起 Agent 子进程并依次调用 `Initialize`、`NewSession` 和 `Prompt`。完整示例见 [`example/client/main.go`](example/client/main.go)。
 
 ```go
-proc, err := stdio.StartClient(ctx, myClient{}, stdio.Command{
-	Executable: agentPath,
-	Args:       agentArgs,
-}, acp.ConnectionOptions{})
-if err != nil {
-	return err
-}
-defer func() {
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = errors.Join(err, proc.Shutdown(shutdownCtx))
-}()
+func runClient(ctx context.Context, agentPath string, agentArgs []string, cwd string) (err error) {
+	proc, err := stdio.StartClient(ctx, myClient{}, stdio.Command{
+		Executable: agentPath,
+		Args:       agentArgs,
+	}, acp.ConnectionOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err = errors.Join(err, proc.Shutdown(shutdownCtx))
+	}()
 
-initResp, err := proc.Connection.Initialize(ctx, acp.InitializeRequest{
-	ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
-	ClientInfo:      &acp.Implementation{Name: "my-go-client", Version: "0.1.0"},
-})
-if err != nil {
-	return err
-}
-if initResp.ProtocolVersion != acp.ProtocolVersion(acp.WireProtocolVersion) {
-	return fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
-}
+	initResp, err := proc.Connection.Initialize(ctx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
+		ClientInfo:      &acp.Implementation{Name: "my-go-client", Version: "0.1.0"},
+	})
+	if err != nil {
+		return err
+	}
+	if initResp.ProtocolVersion != acp.ProtocolVersion(acp.WireProtocolVersion) {
+		return fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
+	}
 
-sess, err := proc.Connection.NewSession(ctx, acp.NewSessionRequest{
-	Cwd:        cwd,
-	McpServers: []acp.McpServer{},
-})
-if err != nil {
-	return err
+	sess, err := proc.Connection.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        cwd,
+		McpServers: []acp.McpServer{},
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := proc.Connection.Prompt(ctx, acp.PromptRequest{
+		SessionId: sess.SessionId,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("Hello")},
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nStop reason: %s\n", resp.StopReason)
+	return nil
 }
-resp, err := proc.Connection.Prompt(ctx, acp.PromptRequest{
-	SessionId: sess.SessionId,
-	Prompt:    []acp.ContentBlock{acp.TextBlock("Hello")},
-})
 ```
 
 <a id="run-an-agent-and-client"></a>
@@ -186,7 +193,7 @@ go run ./example/client -agent /path/to/acp-agent -- --acp
 
 ## 协议能力与接口总览
 
-可选的 ACP 能力以独立 Go 接口拆分定义。实现对应可选接口**并**在 `Initialize` 中显式声明能力后才会启用；未声明的能力视为不支持，未实现的入站方法调用会返回 JSON-RPC `-32601`（`Method not found`）。
+可选的 ACP 能力以独立 Go 接口拆分定义。实现对应可选接口**并**按协议要求在 `Initialize` 能力或会话响应中声明后才会启用；未声明的能力视为不支持，未实现的入站请求会返回 JSON-RPC `-32601`（`Method not found`）。
 
 | 角色 | 范围 | 接口 |
 |---|---|---|
@@ -194,7 +201,7 @@ go run ./example/client -agent /path/to/acp-agent -- --acp
 | **Agent** | 可选能力接口 | `AgentAuthenticator`、`AgentLogout`、`AgentLoader`、`AgentSessionLister`、`AgentSessionResumer`、`AgentSessionConfig`、`AgentSessionMode`、`AgentSessionCloser`、`AgentSessionDeleter` |
 | **Client** | 必选核心接口 | `acp.Client`（`RequestPermission`、`SessionUpdate`） |
 | **Client** | 可选能力接口 | `ClientFileReader`、`ClientFileWriter`、`ClientTerminal`、`ClientElicitation`、`ClientElicitationCompletion` |
-| **双向** | `_` 前缀扩展方法 | `ExtensionMethodHandler`（`CallExtension` / `NotifyExtension` 及 `_meta` 保留） |
+| **双向** | `_` 前缀扩展方法 | `ExtensionMethodHandler`（`HandleExtensionMethod`）；连接出站方法 `CallExtension` / `NotifyExtension`；协议类型保留 `_meta` |
 
 <a id="protocol-provenance-and-upstream-tracking"></a>
 ## 协议溯源与上游自动追踪
@@ -238,7 +245,7 @@ SDK 专注于协议与传输层；模型运行时、持久化存储、权限审�
 | 核心对话、权限请求、notices/compaction、plans/subagents、空参数探测、`session/cancel`、`$/cancel_request` | `v1` | 四向（`Go ↔ TS`、`Go ↔ Rust`）× 3 场景 | 12 |
 | `SystemPrompt` 生命周期与能力声明契约 | `v1` | 四向 × 4 能力组合 | 16 |
 | 布尔与字符串 ID 配置项写入 | `v1` | 四向 | 4 |
-| 草案 `v2` 契约套件（`SystemPrompt`、省略/null 能力、完整生命周期/鉴权/配置/反向调用/状态与取消、Prompt 响应后的用户消息更新、版本协商、内容校验拒绝） | `v2` | 四向 | 40 |
+| 草案 `v2` 契约套件（`SystemPrompt`、省略/null 能力、完整生命周期/鉴权/配置/反向调用/状态与取消、Prompt 响应后的用户消息更新、版本协商、内容校验拒绝） | `v2` | 四向 × 10 用例 | 40 |
 | 非法信封与未支持方法接收端探测 | `v2` | Go、TypeScript 与 Rust Agent × 7 探测 | 21 |
 | 可选 MCP-over-ACP 归属、准入与转发前取消探测 | `v1` 与 `v2` unstable | 每协议版本 2 个 SDK Provider + TS 桥接 | 6 |
 | **合计** | | | **99** |

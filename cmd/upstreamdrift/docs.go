@@ -63,20 +63,39 @@ func loadPinDetails(repoRoot string) (schemaDetails, schemaDetails, interopDetai
 	if err := readJSON(filepath.Join(repoRoot, "schema", "lock.json"), &v1); err != nil {
 		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("read schema/lock.json: %w", err)
 	}
+	if strings.TrimSpace(v1.Assets["schema.json"]) == "" {
+		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("schema/lock.json missing assets.schema.json digest")
+	}
 	var v2 schemaDetails
-	v2Path := filepath.Join(repoRoot, "schema", "v2", "lock.json")
-	if _, err := os.Stat(v2Path); err == nil {
-		if err := readJSON(v2Path, &v2); err != nil {
-			return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("read schema/v2/lock.json: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("stat schema/v2/lock.json: %w", err)
+	if err := readJSON(filepath.Join(repoRoot, "schema", "v2", "lock.json"), &v2); err != nil {
+		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("read schema/v2/lock.json: %w", err)
+	}
+	if strings.TrimSpace(v2.Assets["schema.json"]) == "" {
+		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("schema/v2/lock.json missing assets.schema.json digest")
 	}
 	var interop interopDetails
 	if err := readJSON(filepath.Join(repoRoot, "interop", "versions.json"), &interop); err != nil {
 		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("read interop/versions.json: %w", err)
 	}
+	if strings.TrimSpace(interop.TypeScript.Package) == "" {
+		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("interop/versions.json missing typescript.package")
+	}
+	if strings.TrimSpace(interop.Rust.Package) == "" || strings.TrimSpace(interop.Rust.Toolchain) == "" {
+		return schemaDetails{}, schemaDetails{}, interopDetails{}, fmt.Errorf("interop/versions.json missing rust package or toolchain")
+	}
 	return v1, v2, interop, nil
+}
+
+func findMarkerBlock(relPath, content, startMarker, endMarker string) (int, int, error) {
+	startIdx := strings.Index(content, startMarker)
+	endIdx := strings.Index(content, endMarker)
+	if startIdx < 0 || endIdx < 0 || endIdx < startIdx {
+		return 0, 0, fmt.Errorf("%s is missing or has malformed upstream pin markers (%s ... %s)", relPath, startMarker, endMarker)
+	}
+	if strings.Count(content, startMarker) != 1 || strings.Count(content, endMarker) != 1 {
+		return 0, 0, fmt.Errorf("%s has duplicate upstream pin markers (%s ... %s)", relPath, startMarker, endMarker)
+	}
+	return startIdx, endIdx, nil
 }
 
 func checkDocs(repoRoot string, lock upstreamLock) error {
@@ -87,20 +106,13 @@ func checkDocs(repoRoot string, lock upstreamLock) error {
 	for _, target := range managedDocTargets {
 		path := filepath.Join(repoRoot, target.relPath)
 		raw, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			continue
-		}
 		if err != nil {
 			return fmt.Errorf("read %s: %w", target.relPath, err)
 		}
 		content := string(raw)
-		startIdx := strings.Index(content, target.startMarker)
-		endIdx := strings.Index(content, target.endMarker)
-		if startIdx < 0 && endIdx < 0 {
-			continue
-		}
-		if startIdx < 0 || endIdx < 0 || endIdx < startIdx {
-			return fmt.Errorf("%s has malformed upstream pin markers (%s ... %s)", target.relPath, target.startMarker, target.endMarker)
+		startIdx, endIdx, err := findMarkerBlock(target.relPath, content, target.startMarker, target.endMarker)
+		if err != nil {
+			return err
 		}
 		actual := content[startIdx : endIdx+len(target.endMarker)]
 		want := wrapMarkerBlock(target.startMarker, target.endMarker, target.render(lock, v1, v2, interop))
@@ -120,20 +132,13 @@ func syncDocs(repoRoot string, lock upstreamLock) ([]string, error) {
 	for _, target := range managedDocTargets {
 		path := filepath.Join(repoRoot, target.relPath)
 		raw, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			continue
-		}
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", target.relPath, err)
 		}
 		content := string(raw)
-		startIdx := strings.Index(content, target.startMarker)
-		endIdx := strings.Index(content, target.endMarker)
-		if startIdx < 0 && endIdx < 0 {
-			continue
-		}
-		if startIdx < 0 || endIdx < 0 || endIdx < startIdx {
-			return nil, fmt.Errorf("%s has malformed upstream pin markers (%s ... %s)", target.relPath, target.startMarker, target.endMarker)
+		startIdx, endIdx, err := findMarkerBlock(target.relPath, content, target.startMarker, target.endMarker)
+		if err != nil {
+			return nil, err
 		}
 		want := wrapMarkerBlock(target.startMarker, target.endMarker, target.render(lock, v1, v2, interop))
 		next := content[:startIdx] + want + content[endIdx+len(target.endMarker):]

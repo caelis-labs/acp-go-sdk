@@ -22,6 +22,7 @@ function fixture(t, bootstrap = false) {
     write('.release-please-manifest.json', JSON.stringify({'.': version}));
     write('CHANGELOG.md', `# Changelog\n\n## [v${version}] - 2026-09-19\n\nRelease notes\n`);
     write('README.md', `# SDK\n\ngo get github.com/caelis-labs/acp-go-sdk@v${version}\n`);
+    write('README.zh-CN.md', `# SDK\n\ngo get github.com/caelis-labs/acp-go-sdk@v${version}\n`);
   };
   git('init', '-b', 'main');
   git('config', 'user.name', 'CI Test');
@@ -74,6 +75,8 @@ for (const [name, mutate, error] of [
   ['mismatched heading', f => f.write('CHANGELOG.md', '# Changelog\n\n## 1.5.0\n'), /heading must match/],
   ['unreleased heading', f => f.write('CHANGELOG.md', '# Changelog\n\n## Unreleased\n\n## 1.4.0\n'), /heading must match/],
   ['mismatched README', f => f.write('README.md', 'go get github.com/caelis-labs/acp-go-sdk@v1.3.0\n'), /installation version/],
+  ['mismatched README.zh-CN', f => f.write('README.zh-CN.md', 'go get github.com/caelis-labs/acp-go-sdk@v1.3.0\n'), /README\.zh-CN\.md installation version/],
+  ['missing README.zh-CN', f => rmSync(join(f.cwd, 'README.zh-CN.md')), /regular non-executable/],
   ['missing changelog', f => rmSync(join(f.cwd, 'CHANGELOG.md')), /regular non-executable/],
   ['deleted manifest', f => rmSync(join(f.cwd, '.release-please-manifest.json')), /regular non-executable/],
   ['executable metadata', f => chmodSync(join(f.cwd, 'CHANGELOG.md'), 0o755), /regular non-executable/],

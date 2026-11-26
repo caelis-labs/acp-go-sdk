@@ -32,8 +32,8 @@ Use it independently of Caelis or any particular agent framework.
 ```mermaid
 flowchart LR
     Client["Client App (Editor / CLI)"] -->|"Initialize / NewSession / Prompt"| ClientConn["acp.ClientSideConnection"]
+    ClientConn -->|"SessionUpdate / RequestPermission / fs / terminal"| Client
     ClientConn <-->|"transport/stdio (NDJSON · stderr drain · process-tree cleanup)"| AgentConn["acp.AgentSideConnection"]
-    AgentConn -->|"SessionUpdate / RequestPermission / fs / terminal"| Client
     AgentConn <-->|"Typed Go Handlers"| Agent["Agent App (Model / Tools)"]
 ```
 
@@ -115,41 +115,48 @@ func main() {
 Implement `acp.Client` (`RequestPermission`, `SessionUpdate`), launch the agent executable via `stdio.StartClient`, negotiate `Initialize`, and stream session updates. See [`example/client/main.go`](example/client/main.go) for the complete runnable client.
 
 ```go
-proc, err := stdio.StartClient(ctx, myClient{}, stdio.Command{
-	Executable: agentPath,
-	Args:       agentArgs,
-}, acp.ConnectionOptions{})
-if err != nil {
-	return err
-}
-defer func() {
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = errors.Join(err, proc.Shutdown(shutdownCtx))
-}()
+func runClient(ctx context.Context, agentPath string, agentArgs []string, cwd string) (err error) {
+	proc, err := stdio.StartClient(ctx, myClient{}, stdio.Command{
+		Executable: agentPath,
+		Args:       agentArgs,
+	}, acp.ConnectionOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err = errors.Join(err, proc.Shutdown(shutdownCtx))
+	}()
 
-initResp, err := proc.Connection.Initialize(ctx, acp.InitializeRequest{
-	ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
-	ClientInfo:      &acp.Implementation{Name: "my-go-client", Version: "0.1.0"},
-})
-if err != nil {
-	return err
-}
-if initResp.ProtocolVersion != acp.ProtocolVersion(acp.WireProtocolVersion) {
-	return fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
-}
+	initResp, err := proc.Connection.Initialize(ctx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
+		ClientInfo:      &acp.Implementation{Name: "my-go-client", Version: "0.1.0"},
+	})
+	if err != nil {
+		return err
+	}
+	if initResp.ProtocolVersion != acp.ProtocolVersion(acp.WireProtocolVersion) {
+		return fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
+	}
 
-sess, err := proc.Connection.NewSession(ctx, acp.NewSessionRequest{
-	Cwd:        cwd,
-	McpServers: []acp.McpServer{},
-})
-if err != nil {
-	return err
+	sess, err := proc.Connection.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        cwd,
+		McpServers: []acp.McpServer{},
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := proc.Connection.Prompt(ctx, acp.PromptRequest{
+		SessionId: sess.SessionId,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("Hello")},
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nStop reason: %s\n", resp.StopReason)
+	return nil
 }
-resp, err := proc.Connection.Prompt(ctx, acp.PromptRequest{
-	SessionId: sess.SessionId,
-	Prompt:    []acp.ContentBlock{acp.TextBlock("Hello")},
-})
 ```
 
 ### Run an agent and client
@@ -183,7 +190,7 @@ go run ./example/client -agent /path/to/acp-agent -- --acp
 
 ## Capabilities and interfaces
 
-Optional ACP capabilities are modeled as separate opt-in Go interfaces. Implement an optional interface **and** advertise its capability during `Initialize`; omitted capabilities mean unsupported, and unimplemented inbound methods return JSON-RPC `-32601` (`Method not found`).
+Optional ACP capabilities are modeled as separate opt-in Go interfaces. Implement an optional interface **and** advertise its capability where required by the protocol (`Initialize` capabilities or session responses); omitted capabilities mean unsupported, and unimplemented inbound requests return JSON-RPC `-32601` (`Method not found`).
 
 | Side | Scope | Interfaces |
 |---|---|---|
@@ -191,7 +198,7 @@ Optional ACP capabilities are modeled as separate opt-in Go interfaces. Implemen
 | **Agent** | Optional capabilities | `AgentAuthenticator`, `AgentLogout`, `AgentLoader`, `AgentSessionLister`, `AgentSessionResumer`, `AgentSessionConfig`, `AgentSessionMode`, `AgentSessionCloser`, `AgentSessionDeleter` |
 | **Client** | Required baseline | `acp.Client` (`RequestPermission`, `SessionUpdate`) |
 | **Client** | Optional capabilities | `ClientFileReader`, `ClientFileWriter`, `ClientTerminal`, `ClientElicitation`, `ClientElicitationCompletion` |
-| **Both** | Custom `_`-prefixed extensions | `ExtensionMethodHandler` (`CallExtension` / `NotifyExtension` + `_meta` preservation) |
+| **Both** | Custom `_`-prefixed extensions | `ExtensionMethodHandler` (`HandleExtensionMethod`); outbound `CallExtension` / `NotifyExtension` on connections; `_meta` preserved on protocol types |
 
 ## Protocol provenance and upstream tracking
 
@@ -233,7 +240,7 @@ The repository includes a deterministic four-direction interoperability harness 
 | Core conversation, permission, notices/compaction, plans/subagents, empty params, `session/cancel`, `$/cancel_request` | `v1` | Four directions (`Go ↔ TS`, `Go ↔ Rust`) × 3 scenarios | 12 |
 | `SystemPrompt` lifecycle & capability contracts | `v1` | Four directions × 4 capability profiles | 16 |
 | Boolean & string-ID configuration writes | `v1` | Four directions | 4 |
-| Draft `v2` contract suite (`SystemPrompt`, omitted/null capabilities, full lifecycle/auth/config/reverse/states/cancellation, post-response user-message updates, version negotiation, content rejection) | `v2` | Four directions | 40 |
+| Draft `v2` contract suite (`SystemPrompt`, omitted/null capabilities, full lifecycle/auth/config/reverse/states/cancellation, post-response user-message updates, version negotiation, content rejection) | `v2` | Four directions × 10 cases | 40 |
 | Invalid-envelope & unsupported-method receiver wire probes | `v2` | Go, TypeScript, and Rust agents × 7 probes | 21 |
 | Opt-in MCP-over-ACP attribution, admission & pre-forward cancellation | `v1` & `v2` unstable | Two SDK providers + TypeScript bridge per profile | 6 |
 | **Total** | | | **99** |

@@ -197,19 +197,14 @@ func checkLocalLocks(repoRoot string, lock upstreamLock) error {
 		return fmt.Errorf("upstream protocol stable pin does not match schema/lock.json")
 	}
 
-	v2LockPath := filepath.Join(repoRoot, "schema", "v2", "lock.json")
-	if _, err := os.Stat(v2LockPath); err == nil {
-		var schemaV2 schemaLockFile
-		if err := readJSON(v2LockPath, &schemaV2); err != nil {
-			return fmt.Errorf("read v2 schema lock: %w", err)
-		}
-		if schemaV2.Repository != lock.Protocol.Repository ||
-			schemaV2.Tag != lock.Protocol.V2Tag ||
-			schemaV2.Commit != lock.Protocol.V2Commit {
-			return fmt.Errorf("upstream protocol v2 pin does not match schema/v2/lock.json")
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat v2 schema lock: %w", err)
+	var schemaV2 schemaLockFile
+	if err := readJSON(filepath.Join(repoRoot, "schema", "v2", "lock.json"), &schemaV2); err != nil {
+		return fmt.Errorf("read v2 schema lock: %w", err)
+	}
+	if schemaV2.Repository != lock.Protocol.Repository ||
+		schemaV2.Tag != lock.Protocol.V2Tag ||
+		schemaV2.Commit != lock.Protocol.V2Commit {
+		return fmt.Errorf("upstream protocol v2 pin does not match schema/v2/lock.json")
 	}
 
 	var interop interopLockFile
