@@ -180,6 +180,13 @@ func parseGitHubRepo(raw string) (owner, repo string, err error) {
 }
 
 func checkLocal(repoRoot string, lock upstreamLock) error {
+	if err := checkLocalLocks(repoRoot, lock); err != nil {
+		return err
+	}
+	return checkDocs(repoRoot, lock)
+}
+
+func checkLocalLocks(repoRoot string, lock upstreamLock) error {
 	var schema schemaLockFile
 	if err := readJSON(filepath.Join(repoRoot, "schema", "lock.json"), &schema); err != nil {
 		return fmt.Errorf("read schema lock: %w", err)
@@ -188,6 +195,16 @@ func checkLocal(repoRoot string, lock upstreamLock) error {
 		schema.Tag != lock.Protocol.StableTag ||
 		schema.Commit != lock.Protocol.StableCommit {
 		return fmt.Errorf("upstream protocol stable pin does not match schema/lock.json")
+	}
+
+	var schemaV2 schemaLockFile
+	if err := readJSON(filepath.Join(repoRoot, "schema", "v2", "lock.json"), &schemaV2); err != nil {
+		return fmt.Errorf("read v2 schema lock: %w", err)
+	}
+	if schemaV2.Repository != lock.Protocol.Repository ||
+		schemaV2.Tag != lock.Protocol.V2Tag ||
+		schemaV2.Commit != lock.Protocol.V2Commit {
+		return fmt.Errorf("upstream protocol v2 pin does not match schema/v2/lock.json")
 	}
 
 	var interop interopLockFile

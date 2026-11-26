@@ -20,12 +20,13 @@ func main() {
 	repoRoot := flag.String("repo", ".", "repository root containing schema/, interop/, and upstream/")
 	lockPath := flag.String("lock", "upstream/lock.json", "upstream lock path relative to the repository root")
 	remote := flag.Bool("remote", false, "query GitHub for newer official tags and releases")
+	syncDocsFlag := flag.Bool("sync-docs", false, "sync marked upstream pin tables in README and docs from lock files")
 	jsonOut := flag.Bool("json", false, "write a machine-readable report to stdout")
 	timeout := flag.Duration("timeout", 30*time.Second, "timeout for remote GitHub queries")
 	apiURL := flag.String("github-api", "", "GitHub API base URL (defaults to https://api.github.com or ACP_UPSTREAM_GITHUB_API)")
 	flag.Parse()
 
-	if err := run(*repoRoot, *lockPath, *remote, *jsonOut, *timeout, *apiURL); err != nil {
+	if err := run(*repoRoot, *lockPath, *remote, *syncDocsFlag, *jsonOut, *timeout, *apiURL); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if isDrift(err) {
 			os.Exit(exitDrift)
@@ -47,7 +48,10 @@ func isDrift(err error) bool {
 	return errors.As(err, &drift)
 }
 
-func run(repoRoot, lockPath string, remote, jsonOut bool, timeout time.Duration, apiURL string) error {
+func run(repoRoot, lockPath string, remote, syncOnly, jsonOut bool, timeout time.Duration, apiURL string) error {
+	if remote && syncOnly {
+		return errors.New("-remote and -sync-docs cannot be used together")
+	}
 	repoRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return fmt.Errorf("resolve repository root: %w", err)
@@ -58,6 +62,24 @@ func run(repoRoot, lockPath string, remote, jsonOut bool, timeout time.Duration,
 	lock, err := loadLock(lockPath)
 	if err != nil {
 		return err
+	}
+	if syncOnly {
+		if err := checkLocalLocks(repoRoot, lock); err != nil {
+			return err
+		}
+		updated, err := syncDocs(repoRoot, lock)
+		if err != nil {
+			return err
+		}
+		if err := checkLocal(repoRoot, lock); err != nil {
+			return err
+		}
+		if len(updated) == 0 {
+			fmt.Println("upstream doc pins are already up to date")
+		} else {
+			fmt.Printf("updated upstream doc pins: %s\n", updated)
+		}
+		return nil
 	}
 	if err := checkLocal(repoRoot, lock); err != nil {
 		return err

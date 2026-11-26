@@ -48,6 +48,14 @@ jobs:
         run: |
           base=$(node -p 'JSON.parse(process.env.CONTEXT).base')
           git diff --check "$base" HEAD
+      - uses: actions/setup-go@v7
+        if: steps.scope.outputs.full == 'false'
+        with:
+          go-version: 1.25.x
+          cache: false
+      - name: Verify upstream lock and doc pins
+        if: steps.scope.outputs.full == 'false'
+        run: make verify-upstream
 
   release-approval:
     needs: changes

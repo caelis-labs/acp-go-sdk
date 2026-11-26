@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const releaseFiles = new Set(['.release-please-manifest.json', 'CHANGELOG.md']);
-const rootDocs = new Set(['README.md', 'RELEASING.md', 'SECURITY.md', 'AGENTS.md', 'upstream/README.md']);
+const rootDocs = new Set(['README.md', 'README.zh-CN.md', 'RELEASING.md', 'SECURITY.md', 'AGENTS.md', 'upstream/README.md']);
 const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const isDoc = path => rootDocs.has(path) || (path.startsWith('docs/') && path.endsWith('.md'));
 
@@ -35,7 +35,8 @@ function changelogVersion(content) {
 
 export function validateReleaseMetadata(cwd = process.cwd(), ref = 'HEAD') {
   const git = gitAt(cwd);
-  for (const path of [...releaseFiles, 'README.md']) {
+  const versionedReadmes = ['README.md', 'README.zh-CN.md'];
+  for (const path of [...releaseFiles, ...versionedReadmes]) {
     if (!git('ls-tree', ref, '--', path).startsWith('100644 blob ')) {
       throw new Error(`${path} must be a regular non-executable file`);
     }
@@ -44,10 +45,12 @@ export function validateReleaseMetadata(cwd = process.cwd(), ref = 'HEAD') {
   if (changelogVersion(git('show', `${ref}:CHANGELOG.md`)) !== version) {
     throw new Error(`first changelog release heading must match ${version}`);
   }
-  const readme = git('show', `${ref}:README.md`);
-  const installs = [...readme.matchAll(/^go get github\.com\/caelis-labs\/acp-go-sdk@v(\S+)$/gm)];
-  if (installs.length !== 1 || installs[0][1] !== version) {
-    throw new Error(`README installation version must match ${version}`);
+  for (const path of versionedReadmes) {
+    const readme = git('show', `${ref}:${path}`);
+    const installs = [...readme.matchAll(/^go get github\.com\/caelis-labs\/acp-go-sdk@v(\S+)$/gm)];
+    if (installs.length !== 1 || installs[0][1] !== version) {
+      throw new Error(`${path} installation version must match ${version}`);
+    }
   }
   return version;
 }
