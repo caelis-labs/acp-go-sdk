@@ -33,7 +33,7 @@ function fixture(t, bootstrap = false) {
 }
 
 test('only maintained prose and release metadata can select lightweight CI', () => {
-  for (const path of ['README.md', 'RELEASING.md', 'SECURITY.md', 'AGENTS.md', 'upstream/README.md',
+  for (const path of ['README.md', 'README.zh-CN.md', 'RELEASING.md', 'SECURITY.md', 'AGENTS.md', 'upstream/README.md',
     'docs/upgrading-to-v1.4.0.md', 'CHANGELOG.md', '.release-please-manifest.json']) {
     assert.equal(classifyPaths([path]).full, false, path);
   }

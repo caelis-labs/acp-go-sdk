@@ -138,6 +138,108 @@ func TestIssueTitleMultipleFindings(t *testing.T) {
 	}
 }
 
+func TestCheckLocalRejectsStaleDocsAndSyncDocsRepairsThem(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	lock := validLock()
+	writeJSON(t, filepath.Join(root, "upstream", "lock.json"), lock)
+	writeJSON(t, filepath.Join(root, "schema", "lock.json"), map[string]any{
+		"repository": lock.Protocol.Repository,
+		"tag":        lock.Protocol.StableTag,
+		"commit":     lock.Protocol.StableCommit,
+		"assets": map[string]string{
+			"schema.json": "1111111111111111111111111111111111111111111111111111111111111111",
+		},
+	})
+	writeJSON(t, filepath.Join(root, "schema", "v2", "lock.json"), map[string]any{
+		"repository": lock.Protocol.Repository,
+		"tag":        lock.Protocol.V2Tag,
+		"commit":     lock.Protocol.V2Commit,
+		"assets": map[string]string{
+			"schema.json": "2222222222222222222222222222222222222222222222222222222222222222",
+		},
+	})
+	writeJSON(t, filepath.Join(root, "interop", "versions.json"), map[string]any{
+		"typescript": map[string]string{
+			"package":    "@agentclientprotocol/sdk",
+			"repository": lock.TypeScriptSDK.Repository,
+			"tag":        lock.TypeScriptSDK.Tag,
+			"commit":     lock.TypeScriptSDK.Commit,
+		},
+		"rust": map[string]string{
+			"package":    "agent-client-protocol",
+			"repository": lock.RustSDK.Repository,
+			"tag":        lock.RustSDK.Tag,
+			"commit":     lock.RustSDK.Commit,
+			"toolchain":  "1.88.0",
+		},
+	})
+
+	readme := "# ACP\n\n<!-- upstream-pins:en:start -->\nstale\n<!-- upstream-pins:en:end -->\n"
+	readmeZH := "# ACP\n\n<!-- upstream-pins:zh-CN:start -->\nstale\n<!-- upstream-pins:zh-CN:end -->\n"
+	v2Doc := "# v2\n\n<!-- upstream-pins:v2:start -->\nstale\n<!-- upstream-pins:v2:end -->\n"
+	for rel, body := range map[string]string{
+		"README.md":       readme,
+		"README.zh-CN.md": readmeZH,
+		filepath.Join("docs", "experimental-v2.md"): v2Doc,
+	} {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := checkLocal(root, lock); err == nil || !strings.Contains(err.Error(), "out of date") {
+		t.Fatalf("checkLocal err = %v, want out-of-date error", err)
+	}
+
+	updated, err := syncDocs(root, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated) != 3 {
+		t.Fatalf("updated = %v, want 3 files", updated)
+	}
+	if err := checkLocal(root, lock); err != nil {
+		t.Fatalf("checkLocal after syncDocs failed: %v", err)
+	}
+}
+
+func TestCheckLocalRejectsMismatchedV2SchemaLock(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	lock := validLock()
+	writeJSON(t, filepath.Join(root, "upstream", "lock.json"), lock)
+	writeJSON(t, filepath.Join(root, "schema", "lock.json"), map[string]string{
+		"repository": lock.Protocol.Repository,
+		"tag":        lock.Protocol.StableTag,
+		"commit":     lock.Protocol.StableCommit,
+	})
+	writeJSON(t, filepath.Join(root, "schema", "v2", "lock.json"), map[string]string{
+		"repository": lock.Protocol.Repository,
+		"tag":        "schema-v2.0.0-alpha.999",
+		"commit":     lock.Protocol.V2Commit,
+	})
+	writeJSON(t, filepath.Join(root, "interop", "versions.json"), map[string]any{
+		"typescript": map[string]string{
+			"repository": lock.TypeScriptSDK.Repository,
+			"tag":        lock.TypeScriptSDK.Tag,
+			"commit":     lock.TypeScriptSDK.Commit,
+		},
+		"rust": map[string]string{
+			"repository": lock.RustSDK.Repository,
+			"tag":        lock.RustSDK.Tag,
+			"commit":     lock.RustSDK.Commit,
+		},
+	})
+	if err := checkLocal(root, lock); err == nil || !strings.Contains(err.Error(), "schema/v2/lock.json") {
+		t.Fatalf("checkLocal err = %v, want schema/v2/lock.json mismatch", err)
+	}
+}
+
 func validLock() upstreamLock {
 	return upstreamLock{
 		Protocol: protocolLock{

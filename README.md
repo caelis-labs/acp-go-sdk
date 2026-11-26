@@ -1,452 +1,288 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # ACP Go SDK
 
-[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/caelis-labs/acp-go-sdk.svg)](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk)
+[![Release](https://img.shields.io/github/v/release/caelis-labs/acp-go-sdk)](https://github.com/caelis-labs/acp-go-sdk/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/caelis-labs/acp-go-sdk)](go.mod)
+[![ACP v1 Schema](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcaelis-labs%2Facp-go-sdk%2Fmain%2Fupstream%2Flock.json&query=%24.protocol.stableTag&label=ACP%20v1&color=blue)](#protocol-provenance-and-upstream-tracking)
+[![ACP v2 Draft](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcaelis-labs%2Facp-go-sdk%2Fmain%2Fupstream%2Flock.json&query=%24.protocol.v2Tag&label=ACP%20v2%20draft&color=orange)](#protocol-provenance-and-upstream-tracking)
+[![Interop TS](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcaelis-labs%2Facp-go-sdk%2Fmain%2Fupstream%2Flock.json&query=%24.typescriptSdk.tag&label=Interop%20TS&color=brightgreen)](#official-sdk-interoperability)
+[![Interop Rust](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcaelis-labs%2Facp-go-sdk%2Fmain%2Fupstream%2Flock.json&query=%24.rustSdk.tag&label=Interop%20Rust&color=brightgreen)](#official-sdk-interoperability)
+[![Upstream Drift](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/upstream-drift.yml/badge.svg)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/upstream-drift.yml)
+[![CI](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/caelis-labs/acp-go-sdk/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/caelis-labs/acp-go-sdk)](LICENSE)
 
-**Build [Agent Client Protocol (ACP)](https://agentclientprotocol.com) agents and clients in Go.**
-Connect your agent to ACP clients, or add ACP agent support to your editor,
-terminal, or application with typed APIs and stdio subprocess management.
+**Build production-grade [Agent Client Protocol (ACP)](https://agentclientprotocol.com) agents and clients in Go.**
+Connect your agent to ACP-compatible editors and CLIs, or embed ACP agent support into your own application with typed Go APIs, bounded concurrency, and cross-platform `stdio` subprocess management.
 
 Maintained by Caelis Labs and listed in [ACP's community libraries](https://agentclientprotocol.com/libraries/community#go).
 Use it independently of Caelis or any particular agent framework.
 
-- **Both sides of ACP:** implement an [agent](#agent-side), build a
-  [client](#client-side-and-subprocesses), and stream session updates with typed Go APIs.
-- **Stable protocol, pinned schema:** ACP wire protocol v1, generated from
-  official `schema-v1.35.0`. [Trace every generated type to its source](#protocol-provenance).
-- **Tested across languages:** a [four-direction interoperability matrix](#official-sdk-interoperability)
-  checks Go clients and agents against the official TypeScript and Rust SDKs.
-- **Predictable resource and process handling:** bounded queues, ordered
-  notifications, cancellation, and [stdio shutdown with process-tree cleanup](#client-side-and-subprocesses).
+[Install](#install) · [Quick start](#quick-start) · [Upstream tracking](#protocol-provenance-and-upstream-tracking) · [Official SDK interop](#official-sdk-interoperability) · [API reference](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk) · [简体中文](README.zh-CN.md)
 
-[Install](#install) · [Run the examples](#run-an-agent-and-client) ·
-[API reference](https://pkg.go.dev/github.com/caelis-labs/acp-go-sdk) ·
-[Compatibility and scope](#compatibility-and-scope)
+## Why `caelis-labs/acp-go-sdk`?
+
+- **Stable `v1` module with minimal dependencies:** The root `acp` package ships a stable `v1` API for ACP wire protocol `1` with only a single module dependency ([`golang.org/x/sys`](go.mod)). `schema.unstable.json` and draft `experimental/v2` are strictly isolated from the root package.
+- **Timely official protocol alignment & automated upstream tracking:** Types and dispatchers are deterministically generated from pinned official schemas in [`schema/lock.json`](schema/lock.json) (SHA256-verified). A daily GitHub Action ([`upstream-drift.yml`](.github/workflows/upstream-drift.yml)) checks upstream `schema-v1*`, `schema-v2*`, TypeScript SDK, and Rust SDK releases and opens an `upstream-drift` issue automatically whenever any pin falls behind; `make verify-upstream` enforces lock-to-doc consistency in CI.
+- **Release-gated official TypeScript & Rust SDK interoperability:** Every release must pass a live **99-case** conformance gate across **both** ACP wire profiles (`v1` and `v2`) against the pinned official TypeScript and Rust SDK peers tracked in [`upstream/lock.json`](upstream/lock.json), with machine-readable evidence artifacts.
+- **Bounded concurrency & deterministic cancellation:** Production defaults cap frame sizes (`10 MiB`), pending requests (`1024`), handler concurrency (`32`), and ordered notification buffers (`1024` items / `32 MiB`), alongside lossless string/number request IDs, `$/cancel_request`, and JSON-RPC `-32800` cancellation.
+- **Hardened `stdio` subprocess governance:** Launches executables directly (never via an implicit shell), drains child `stderr`, duplicates process `stdin`/`stdout` independently, and supports graceful `Shutdown(ctx)` with Unix process-group and Windows kill-on-close Job Object cleanup (without console popups).
+
+```mermaid
+flowchart LR
+    Client["Client App (Editor / CLI)"] -->|"Initialize / NewSession / Prompt"| ClientConn["acp.ClientSideConnection"]
+    ClientConn <-->|"transport/stdio (NDJSON · stderr drain · process-tree cleanup)"| AgentConn["acp.AgentSideConnection"]
+    AgentConn -->|"SessionUpdate / RequestPermission / fs / terminal"| Client
+    AgentConn <-->|"Typed Go Handlers"| Agent["Agent App (Model / Tools)"]
+```
 
 ## Install
 
 Requires **Go 1.23 or later**.
 
 <!-- x-release-please-start-version -->
-~~~bash
+```bash
 go get github.com/caelis-labs/acp-go-sdk@v1.9.1
-~~~
+```
 <!-- x-release-please-end -->
 
 Import the root package as `acp`:
 
-~~~go
+```go
 import acp "github.com/caelis-labs/acp-go-sdk"
-~~~
+```
 
-The Go module release, official schema version, and negotiated wire protocol
-version are separate identities. The install command pins the SDK release;
-`schema-v1.35.0` describes the schema used to generate its ACP v1 types.
+The Go module release, pinned official schema tag (exposed at runtime via `acp.SchemaTag`), and negotiated wire protocol version (`acp.WireProtocolVersion`) are tracked as separate identities.
 
-## Run an agent and client
+## Quick start
 
-Run a complete local conversation with only Go installed. The sample agent
-returns a fixed greeting, so no model account, API key, Node.js, or Rust is needed.
+### 1. Build an agent
 
-~~~bash
+Implement the four baseline methods on `acp.Agent` (`Initialize`, `NewSession`, `Prompt`, `Cancel`) and serve over `stdio`. Application logs belong on `stderr`; `stdout` is reserved exclusively for ACP NDJSON frames. See [`example/minimal-agent/main.go`](example/minimal-agent/main.go) for the full runnable file.
+
+```go
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+
+	acp "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/acp-go-sdk/transport/stdio"
+)
+
+type myAgent struct{}
+
+func (*myAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
+	return acp.InitializeResponse{
+		AgentInfo:       &acp.Implementation{Name: "my-acp-agent", Version: "0.1.0"},
+		ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
+	}, nil
+}
+
+func (*myAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	return acp.NewSessionResponse{SessionId: acp.SessionId("session-1")}, nil
+}
+
+func (*myAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
+	conn, ok := acp.AgentSideConnectionFromContext(ctx)
+	if !ok {
+		return acp.PromptResponse{}, errors.New("missing agent connection in context")
+	}
+	if err := conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: params.SessionId,
+		Update:    acp.UpdateAgentMessageText("Hello from Go ACP!"),
+	}); err != nil {
+		return acp.PromptResponse{}, err
+	}
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func (*myAgent) Cancel(context.Context, acp.CancelNotification) error { return nil }
+
+func main() {
+	if err := stdio.ServeAgent(context.Background(), &myAgent{}, acp.ConnectionOptions{}); err != nil &&
+		!errors.Is(err, acp.ErrPeerClosed) {
+		log.Fatal(err)
+	}
+}
+```
+
+### 2. Build a client
+
+Implement `acp.Client` (`RequestPermission`, `SessionUpdate`), launch the agent executable via `stdio.StartClient`, negotiate `Initialize`, and stream session updates. See [`example/client/main.go`](example/client/main.go) for the complete runnable client.
+
+```go
+proc, err := stdio.StartClient(ctx, myClient{}, stdio.Command{
+	Executable: agentPath,
+	Args:       agentArgs,
+}, acp.ConnectionOptions{})
+if err != nil {
+	return err
+}
+defer func() {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = errors.Join(err, proc.Shutdown(shutdownCtx))
+}()
+
+initResp, err := proc.Connection.Initialize(ctx, acp.InitializeRequest{
+	ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion),
+	ClientInfo:      &acp.Implementation{Name: "my-go-client", Version: "0.1.0"},
+})
+if err != nil {
+	return err
+}
+if initResp.ProtocolVersion != acp.ProtocolVersion(acp.WireProtocolVersion) {
+	return fmt.Errorf("unsupported ACP protocol version %d", initResp.ProtocolVersion)
+}
+
+sess, err := proc.Connection.NewSession(ctx, acp.NewSessionRequest{
+	Cwd:        cwd,
+	McpServers: []acp.McpServer{},
+})
+if err != nil {
+	return err
+}
+resp, err := proc.Connection.Prompt(ctx, acp.PromptRequest{
+	SessionId: sess.SessionId,
+	Prompt:    []acp.ContentBlock{acp.TextBlock("Hello")},
+})
+```
+
+### Run an agent and client
+
+Run a complete local conversation with only Go installed—no model account, API key, Node.js, or Rust is needed:
+
+```bash
 git clone https://github.com/caelis-labs/acp-go-sdk.git
 cd acp-go-sdk
 go build -o .artifacts/minimal-agent ./example/minimal-agent
 go run ./example/client -agent ./.artifacts/minimal-agent
-~~~
+```
 
 Expected output:
 
-~~~text
+```text
 Hello from the minimal Go ACP agent.
 Stop reason: end_turn
-~~~
+```
 
-On Windows, build `.artifacts/minimal-agent.exe` and pass that path to `-agent`.
-These commands use the repository checkout. The installation command above is
-for applications consuming a published module release.
+On Windows, build `.artifacts/minimal-agent.exe` and pass that path to `-agent`. To connect the sample client to any external installed ACP agent instead, pass its binary and flags after `--`:
+
+```bash
+go run ./example/client -agent /path/to/acp-agent -- --acp
+```
 
 | Start here | What it demonstrates |
 |---|---|
-| [Minimal agent](example/minimal-agent/main.go) | Implement `Initialize`, `NewSession`, `Prompt`, and `Cancel`; stream a response over stdio. |
-| [Client example](example/client/main.go) | Launch an agent, negotiate ACP v1, create a session, send a prompt, print streamed text, and shut down the child. |
+| [`example/minimal-agent/main.go`](example/minimal-agent/main.go) | Implement `Initialize`, `NewSession`, `Prompt`, and `Cancel`; stream a response over `stdio`. |
+| [`example/client/main.go`](example/client/main.go) | Launch an agent, negotiate ACP v1, create a session, send a prompt, print streamed text, and shut down the child tree. |
 
-The client example cancels permission requests and advertises no filesystem or
-terminal capabilities. To connect it to another installed ACP agent, use
-`-agent /path/to/executable`; place the agent's arguments after `--`.
+## Capabilities and interfaces
 
-## Agent side
+Optional ACP capabilities are modeled as separate opt-in Go interfaces. Implement an optional interface **and** advertise its capability during `Initialize`; omitted capabilities mean unsupported, and unimplemented inbound methods return JSON-RPC `-32601` (`Method not found`).
 
-Use the [minimal agent](example/minimal-agent/main.go) as a runnable starting point.
-Implement the four baseline methods on `acp.Agent`: `Initialize`, `NewSession`,
-`Prompt`, and `Cancel`. Optional methods are separate interfaces, such as
-AgentLoader, AgentSessionLister, and AgentSessionConfig. If an optional
-interface is omitted, inbound calls return JSON-RPC method-not-found; do not
-advertise that capability from Initialize.
+| Side | Scope | Interfaces |
+|---|---|---|
+| **Agent** | Required baseline | `acp.Agent` (`Initialize`, `NewSession`, `Prompt`, `Cancel`) |
+| **Agent** | Optional capabilities | `AgentAuthenticator`, `AgentLogout`, `AgentLoader`, `AgentSessionLister`, `AgentSessionResumer`, `AgentSessionConfig`, `AgentSessionMode`, `AgentSessionCloser`, `AgentSessionDeleter` |
+| **Client** | Required baseline | `acp.Client` (`RequestPermission`, `SessionUpdate`) |
+| **Client** | Optional capabilities | `ClientFileReader`, `ClientFileWriter`, `ClientTerminal`, `ClientElicitation`, `ClientElicitationCompletion` |
+| **Both** | Custom `_`-prefixed extensions | `ExtensionMethodHandler` (`CallExtension` / `NotifyExtension` + `_meta` preservation) |
 
-~~~go
-connection, err := stdio.NewAgentConnection(agent, acp.ConnectionOptions{})
-if err != nil {
-    return err
-}
-defer connection.Close()
-return connection.Wait(ctx)
-~~~
+## Protocol provenance and upstream tracking
 
-Import `github.com/caelis-labs/acp-go-sdk/transport/stdio` for this example.
-`stdio.NewAgentConnection` and `stdio.ServeAgent` bind process stdio;
-application logs belong on stderr. They use independently closable duplicates
-of process stdin/stdout, so connection shutdown does not close the caller's
-process-level descriptors. Custom stdio servers can use `stdio.DuplicateFile`
-before transferring a file stream to a Connection.
+Official ACP JSON Schema releases are the sole wire source of truth. Every pinned upstream identity—across stable `schema-v1*`, draft `schema-v2*`, and the official TypeScript and Rust SDKs used for interop—is recorded in [`upstream/lock.json`](upstream/lock.json) and kept in sync with documentation via `make sync-upstream-docs` and verified by `make verify-upstream` in CI.
 
-## Client side and subprocesses
+<!-- upstream-pins:en:start -->
+| Tracked upstream artifact | Repository | Pinned tag / version | Upstream commit | Verification / lock file |
+|---|---|---|---|---|
+| **Stable ACP v1 Schema** (wire `1`) | [`agentclientprotocol/agent-client-protocol`](https://github.com/agentclientprotocol/agent-client-protocol) | `schema-v1.35.0` | `065b5795` | [`schema/lock.json`](schema/lock.json) (`schema.json` SHA256 `d3ddaefb...`) |
+| **Draft ACP v2 Schema** (`experimental/v2`) | [`agentclientprotocol/agent-client-protocol`](https://github.com/agentclientprotocol/agent-client-protocol) | `schema-v2.0.0-beta.4` | `840484ff` | [`schema/v2/lock.json`](schema/v2/lock.json) (`schema.json` SHA256 `86dae71c...`) |
+| **Official TypeScript SDK** | [`agentclientprotocol/typescript-sdk`](https://github.com/agentclientprotocol/typescript-sdk) | `v2.12.0` (`@agentclientprotocol/sdk`) | `6b84c6da` | [`interop/versions.json`](interop/versions.json) |
+| **Official Rust SDK** | [`agentclientprotocol/rust-sdk`](https://github.com/agentclientprotocol/rust-sdk) | `v5.6.1` (`agent-client-protocol`, Rust `1.88.0`) | `4656755a` | [`interop/versions.json`](interop/versions.json) |
+<!-- upstream-pins:en:end -->
 
-Use the [client example](example/client/main.go) for the complete connection flow.
-Implement the baseline `acp.Client` methods `RequestPermission` and `SessionUpdate`;
-opt into filesystem, terminal, or elicitation calls only by implementing and
-advertising their dedicated optional interfaces.
+### Automated upstream drift tracking & alignment SLA
 
-`transport/stdio.StartClient` launches an explicitly named executable with an
-argument slice. It never invokes a shell, drains child stderr, connects the
-typed client, and exposes idempotent close/wait lifecycle. On Windows, ACP
-children are started without creating or showing a console window. `Process`
-retains sole ownership of the underlying command's wait operation.
+- **Daily automated drift detection:** [`.github/workflows/upstream-drift.yml`](.github/workflows/upstream-drift.yml) runs `go run ./cmd/upstreamdrift -remote` ([`scripts/upstream-drift.sh`](scripts/upstream-drift.sh)) every day against GitHub releases/tags and automatically opens or updates an `upstream-drift` issue whenever any schema or official SDK pin falls behind.
+- **Fast alignment policy ([`upstream/README.md`](upstream/README.md)):**
+  - **Stable `schema-v1*`:** locked, regenerated, compatibility-reviewed, and interop-verified within one week of an upstream release.
+  - **Official TypeScript & Rust SDKs:** every formal upstream SDK release bumps the interop pin and re-runs the four-direction matrix—even when the wire schema itself is unchanged.
+  - **Draft `schema-v2*`:** tracks tagged `schema-v2*` snapshots in isolated `experimental/v2` without chasing unpinned commits on upstream `main` or polluting the stable root package.
 
-The client starts an executable directly and exposes typed ACP calls through
-`process.Connection`:
+### Package surface and scope
 
-~~~go
-process, err := stdio.StartClient(ctx, client, stdio.Command{
-    Executable: agentPath,
-    Args:       agentArgs,
-}, acp.ConnectionOptions{})
-if err != nil {
-    return err
-}
-defer func() {
-    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    if err := process.Shutdown(shutdownCtx); err != nil {
-        log.Print(err)
-    }
-}()
-~~~
-
-Then call `Initialize` and verify the returned protocol version before
-`NewSession` and `Prompt`. Handle `SessionUpdate` callbacks to display streamed
-output. The [full example](example/client/main.go) includes those calls, error
-handling, an absolute session working directory, and request deadlines.
-
-Use `Process.Shutdown(ctx)` or `ClientProcess.Shutdown(ctx)` to close protocol
-input first, wait for a graceful exit within the caller's deadline, and then
-forcefully terminate and join the owned process tree. `Close` remains the
-immediate-stop operation. The first `Shutdown` call owns the graceful deadline,
-and later calls receive its cached terminal result. Unix containment covers
-descendants that remain in the inherited process group; Windows children are
-assigned to a kill-on-close Job Object before their initial thread is resumed.
-Grace duration, stderr retention, endpoint policy, and retry decisions remain
-application concerns.
-
-## Compatibility and scope
-
-Use this SDK when you want to connect Go applications to the ACP ecosystem
-while keeping control of your model provider, application state, and permission
-policy. Typed dispatch and transport lifecycle are supplied by the SDK; your
-application implements the agent or client behavior.
-
-| Surface | Contract |
+| Package | Stability contract |
 |---|---|
-| Root `acp` package | Stable ACP wire protocol v1; generated types, Agent/Client dispatch, and concurrent bidirectional JSON-RPC. |
-| `transport/stdio` | Stable NDJSON transport, direct executable launch, stderr draining, and owned subprocess lifecycle. |
-| `experimental/v2` | Separate draft API generated from a pinned `schema-v2*` release; may change incompatibly. |
+| Root `acp` | **Stable ACP wire v1.** Generated types (`schema/schema.json` only), Agent/Client dispatch, and bounded concurrent bidirectional JSON-RPC. |
+| `transport/stdio` | **Stable NDJSON transport.** Direct executable launch, `stderr` draining, independent descriptor duplication, and owned process-tree lifecycle. |
+| `experimental/v2` | **Unstable draft API.** Generated from the pinned `schema-v2*` snapshot; may change incompatibly. Do not import from stable code. See [docs/experimental-v2.md](docs/experimental-v2.md). |
 
-Optional capabilities are opt-in: implement their interfaces and advertise
-only what your application supports. Omitted capabilities mean unsupported.
-The SDK does not supply a model runtime, persistence, authorization policy,
-or unrestricted filesystem or terminal handlers. HTTP/SSE and WebSocket draft
-behavior are outside the stable transport contract.
-
-The stable v1 release line is validated through reproducible generation,
-race/static checks, fuzzing, fresh-consumer builds, native Windows stdio tests,
-and the official SDK interop matrix. See [the CI workflow](.github/workflows/ci.yml)
-and [release gates](RELEASING.md) for the checks and their scope.
+Applications retain full ownership of model execution, persistence, authorization policy, and sandboxed filesystem/terminal implementations. HTTP/SSE and WebSocket draft transports are outside the stable contract. See the [latest alignment notes (2026-11-24)](docs/schema-sdk-alignment-2026-11-24.md), [versioned interop notes](docs/versioned-interop-2026-11-13.md), and migration guides ([v1.5.0](docs/upgrading-to-v1.5.0.md), [v1.4.0](docs/upgrading-to-v1.4.0.md)).
 
 ## Official SDK interoperability
 
-The repository contains a deterministic four-direction interoperability
-matrix against pinned official TypeScript and Rust SDK peers. A Go runner owns
-all assertions; the language-specific peers are thin public-API adapters and
-reserve agent stdout for ACP NDJSON.
+The repository includes a deterministic four-direction interoperability harness against the pinned official TypeScript and Rust SDKs tracked in [`interop/versions.json`](interop/versions.json) and [`upstream/lock.json`](upstream/lock.json). A Go runner owns process lifecycles, timeouts, and assertions, while the TypeScript and Rust peers act as thin public-API adapters over real `stdio` pipes.
 
-To run the conformance tests, install Node.js 24 and use `rustup` to install
-the Rust toolchain pinned in [rust-toolchain.toml](interop/peers/rust/rust-toolchain.toml).
-Then run:
+| Suite | Profile | Directions / scope | Cases |
+|---|---|---|---|
+| Core conversation, permission, notices/compaction, plans/subagents, empty params, `session/cancel`, `$/cancel_request` | `v1` | Four directions (`Go ↔ TS`, `Go ↔ Rust`) × 3 scenarios | 12 |
+| `SystemPrompt` lifecycle & capability contracts | `v1` | Four directions × 4 capability profiles | 16 |
+| Boolean & string-ID configuration writes | `v1` | Four directions | 4 |
+| Draft `v2` contract suite (`SystemPrompt`, omitted/null capabilities, full lifecycle/auth/config/reverse/states/cancellation, post-response user-message updates, version negotiation, content rejection) | `v2` | Four directions | 40 |
+| Invalid-envelope & unsupported-method receiver wire probes | `v2` | Go, TypeScript, and Rust agents × 7 probes | 21 |
+| Opt-in MCP-over-ACP attribution, admission & pre-forward cancellation | `v1` & `v2` unstable | Two SDK providers + TypeScript bridge per profile | 6 |
+| **Total** | | | **99** |
 
-~~~bash
+To run the full interop suite locally (requires **Node.js 24** and the Rust toolchain pinned in [`interop/peers/rust/rust-toolchain.toml`](interop/peers/rust/rust-toolchain.toml)):
+
+```bash
 make interop
-~~~
+```
 
-Both ACP wire profiles run all four Go↔TypeScript and Go↔Rust directions.
-The complete gate has **89 external cases**: 28 stable v1 cases, 40 draft v2
-contract cases, and 21 v2 receiver probes. It checks lifecycle/system prompt
-capabilities and rejection side effects, prompt message-ID association, state
-and cancellation semantics, reverse requests and typed update payloads.
+CI uploads all four machine-readable evidence reports (`evidence.json`, `contract-evidence.json`, `wire-v2-evidence.json`, and `mcp-experimental-evidence.json`) under `.artifacts/interop/`. See [`interop/README.md`](interop/README.md) for the complete case inventory and verification boundaries.
 
-Exact SDK identities are in [interop/versions.json](interop/versions.json).
-CI uploads three reports under `.artifacts/interop/`, recording commits,
-fixture hashes, dependencies and traces. See [the matrix](interop/README.md)
-for the full case inventory and explicit boundaries; this is not a claim of
-all optional capabilities or all third-party agents.
+## Production guarantees and advanced usage
 
-## Protocol provenance
+Pass `acp.ConnectionOptions{}` to select production bounds (`acp.DefaultConnectionOptions()`):
 
-| Identity | Pinned value |
-|---|---|
-| Wire protocol | 1 |
-| Schema artifact | 1.35.0 |
-| Schema tag | schema-v1.35.0 |
-| Upstream commit | 065b57951b6b2a91ac5eddd249e145d1f6d54545 |
-| schema.json SHA256 | d3ddaefbee593abf74beeda91bdf57b58ef99bf90219dc1cb4ae90be3ba18518 |
+| `ConnectionOptions` field | Default | Bounds |
+|---|---|---|
+| `MaxFrameSize` | `10 MiB` | Single NDJSON frame size |
+| `MaxPendingRequests` | `1024` | Concurrent outbound in-flight requests |
+| `MaxHandlerConcurrency` | `32` | Concurrent inbound request handlers |
+| `MaxQueuedRequests` | `128` | Queued inbound requests awaiting dispatch |
+| `MaxQueuedNotifications` | `1024` | Buffered inbound notifications |
+| `MaxNotificationBytes` | `32 MiB` | Bytes across queued + executing notifications |
+| `MaxQueuedWrites` | `1024` | Queued outbound frames |
 
-The exact tag object, commit, assets, and hashes are recorded in
-schema/lock.json. Generated stable code uses schema/schema.json only;
-schema.unstable.json and v2 schemas are not merged into this package.
+Deep-dive reference guides:
 
-Tracked official identities, including the draft v2 schema tag, are also
-recorded in `upstream/lock.json`. `make verify-upstream` checks that file
-against `schema/lock.json` and `interop/versions.json`. A scheduled workflow
-queries GitHub releases and opens an `upstream-drift` issue when a pin is
-behind.
+- **[Connection bounds, lifecycle, and advanced helpers](docs/advanced.md):** `AcceptNotification` and `AcceptRequestID` admission filters, `stdio.DuplicateFile` and `Process.Shutdown(ctx)` cross-platform process-tree cleanup, lossless request IDs and NDJSON batch framing (`SendTransportFrame`, `RejectBatch`), `*acp.RequestError` / `*acp.TransportError`, inbound context helpers (`InboundInfoFromContext`, `InboundParamsFromContext`, `AgentSideConnectionFromContext`, `AfterResponse`, `NewSessionWithResponseHook`), tri-state patch fields, stable `SystemPrompt` capability rules, and `SessionUpdateRaw`.
+- **[Prepared request lifecycle](docs/prepared-requests.md):** `PrepareClientRequest` / `PrepareAgentRequest` for separated dispatch and wait contexts, `ObserveResponse` ordering barriers, and conservative `RequestSubmissionNotStarted` retry classification.
+- **[Draft ACP v2 (`experimental/v2`)](docs/experimental-v2.md):** Isolated draft v2 schema details (`messageId`, `AvailableCommands`, tri-state tool-call `name`), interop gate coverage, and alignment notes.
 
-Draft ACP v2 lives in `experimental/v2`. It is generated from
-`schema-v2.0.0-beta.4` and is not a stable API. `session/prompt` returns the
-required `messageId` of the user message inserted into the conversation;
-the matching user-message update may arrive before or after that response.
-Running, idle, requires_action, and unknown are `session/update` states. Its typed
-dispatch and lifecycle have Go loopback coverage and an independent official
-TypeScript/Rust four-direction interoperability gate.
-Do not import this package from the stable root.
+## Development, validation, and releases
 
-V2 new/resume responses expose optional `AvailableCommands`. Each command is
-a discriminated union: use its `Command` branch with `type: "command"`, or
-preserve unknown kinds through the raw `Other` branch. Omission, an empty
-array, `null`, or a non-array value advertises no initial commands; malformed
-entries are skipped while valid entries retain their order and command input
-extensions. Sending an empty list omits the optional field and never emits
-`null`. Later `available_commands_update` notifications replace the list;
-an empty array clears it. These response and notification paths have dedicated
-Go loopback and decoding coverage, separate from the stable interop matrix.
+Run schema, lock, code-generation, race, and static checks locally:
 
-Tool calls expose an optional programmatic `name`. In stable v1 updates, omitted
-or null names leave an existing name unchanged; `WithStartName` and
-`WithUpdateName` set a name through the session-update helpers. In v2,
-tool-call updates distinguish omission, explicit null (clear), and a string
-(replace) through `NameState`, `SetName`, `ClearName`, and `UnsetName`.
-
-Stable session lifecycle requests now accept `SystemPrompt`. Clients must first
-check `AgentCapabilities.SessionCapabilities.SystemPrompt`: nil means unsupported,
-while an empty capability object supports `append`. Use `override` only when
-the nested `Mode.Override` capability is advertised. A prompt needs
-an explicit mode and nonempty text content; unknown modes are preserved for
-forwarding. Agents own support validation and must reject unsupported modes or
-content before creating, loading, or resuming a session. The SDK does not apply
-model instructions or turn this field into permission or authorization policy.
-
-Stable session notices and context compaction are available when the client
-advertises `ClientSessionCapabilities.Notices` and `.Compaction`. Compaction
-`summary`, `error`, and `_meta` preserve omitted/null/value patch states through
-generated `State`, `Set`, `Clear`, and `Unset` methods. See the
-[v1.5.0 migration notes](docs/upgrading-to-v1.5.0.md) for capability policy,
-receiver validation, and the isolated v2 alpha.8 API changes. The
-[October 2026 alignment notes](docs/schema-sdk-alignment-2026-10.md) describe
-schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-24.md)
-cover schema 1.35.0 / v2 beta.4 and TypeScript 2.12.0. The
-[interop matrix](interop/README.md) now uses Rust 5.6.1.
-The [versioned interop follow-up](docs/versioned-interop-2026-11-13.md) expands
-the verification to both wire profiles and fixes invalid v2 error-envelope IDs.
-
-## Resource bounds and lifecycle
-
-Every connection has finite limits for:
-
-- frame size;
-- outstanding requests;
-- concurrently running inbound handlers;
-- queued requests and ordered notifications;
-- queued writes and cancellation notifications.
-
-Use ConnectionOptions to tune them. Zero values select production defaults.
-Notification buffering is bounded by both count and total method/parameter
-bytes, including the notification currently executing. `MaxNotificationBytes`
-defaults to 32 MiB; exhausting either notification limit fails the connection
-with `ErrNotificationQueueFull` instead of dropping accepted notifications.
-
-`AcceptNotification` optionally filters unsupported notification methods before
-queue admission. A nil predicate accepts every notification. Applications must
-continue accepting the standard and negotiated extension notifications their
-role implements. The predicate runs on the reader, must return immediately,
-and must not panic or call the connection. Requests, responses, and
-`$/cancel_request` bypass it. Filtering does not change the relative order or
-response barriers of accepted notifications, and emits no JSON-RPC response.
-Connections own their reader/writer streams, Close is idempotent, Done signals
-shutdown, Err exposes its immutable cause, and Wait(ctx) waits for all
-connection-owned goroutines.
-
-Both string and numeric JSON-RPC request IDs are matched without float64
-conversion. $/cancel_request cancels the inbound request context and normal
-context cancellation is returned as JSON-RPC -32800.
-
-Each NDJSON line is one transport frame: a single JSON-RPC object, a non-empty
-batch array, or a malformed raw value. Incoming batches keep that boundary;
-response-bearing entries are answered with one response array.
-SendTransportFrame forwards a complete frame for relays without flattening.
-
-JSON-RPC errors are *acp.RequestError; callers can use errors.As to inspect
-Code, Message, and Data.
-
-Transport read and write failures match acp.ErrTransportFailure. Use
-errors.As with *acp.TransportError to inspect the operation and underlying
-cause. For prepared requests this is independent of RequestSubmissionState:
-only RequestSubmissionNotStarted proves that retry cannot duplicate a remote
-effect.
-
-Every inbound handler context exposes acp.InboundInfoFromContext. It reports
-request versus notification and preserves the raw request ID. Generated and
-extension handlers can also retrieve the exact current peer with
-acp.AgentSideConnectionFromContext or acp.ClientSideConnectionFromContext;
-this is safe when one implementation serves multiple connections.
-
-Typed handlers that need compatibility evidence from a newer peer can use
-acp.InboundParamsFromContext. It returns a defensive copy of the original
-params, including unknown nested fields, while the generated dispatcher still
-validates the standard typed request. Standard methods are direction-checked
-before decoding or callback side effects.
-
-Handlers that must send notifications only after a successful request response
-has reached the wire can register one callback with acp.AfterResponse. The
-callback receives a connection-lifetime context; use it instead of retaining
-the completed request context.
-For session creation, ClientSideConnection.NewSessionWithResponseHook lets the
-client install routing from the returned session ID before notifications that
-follow the response are dispatched. The hook must not wait for a later
-notification from the same connection.
-
-Notification handlers are invoked in wire order. They may synchronously issue
-reverse requests; notifications sent before the reverse response are processed
-in that ordered call stack before the request returns. A notification handler's
-context is canceled when the handler returns and must not be retained for
-asynchronous work.
-
-SessionInfoUpdate and the session-info SessionUpdate variant preserve absent,
-explicit null, and value states for title and updatedAt. Use TitleState or
-UpdatedAtState to inspect decoded state, and the generated Set, Clear, and
-Unset methods to construct an update. The existing pointer fields remain
-available for value access and direct non-nil assignment.
-
-For transparent forwarding across schema revisions,
-AgentSideConnection.SessionUpdateRaw accepts lossless JSON params while fixing
-the wire method to `session/update`. It validates only the outer `sessionId`
-and `update` object; the caller owns the semantics of the opaque update. It
-does not expose arbitrary standard-method sending or bypass connection
-ordering and structured transport errors.
-
-## Prepared request lifecycle
-
-Advanced callers can reserve a bounded pending request without writing to the
-transport, dispatch it under one context, and transfer response ownership to a
-different context:
-
-~~~go
-request, err := acp.PrepareClientRequest[acp.PromptResponse](
-    connection,
-    acp.AgentMethodSessionPrompt,
-    params,
-)
-if err != nil {
-    return err
-}
-defer request.Abandon()
-
-if err := request.ObserveResponse(func(ctx context.Context, response acp.RPCResponse) error {
-    // response.Result is available before typed decoding. JSON-RPC failures
-    // are reported through response.Error as *acp.RequestError.
-    return updateLocalAdmission(ctx, response)
-}); err != nil {
-    return err
-}
-
-if err := request.Dispatch(dispatchCtx, acp.DispatchOptions{
-    Abort: func(error) error { return connection.Close() },
-}); err != nil {
-    if state, ok := acp.RequestSubmissionStateOf(err); ok &&
-        state == acp.RequestSubmissionNotStarted {
-        // The writer was never invoked and can no longer be invoked.
-    }
-    return err
-}
-
-response, err := request.Wait(producerCtx)
-~~~
-
-`Dispatch` returning nil proves only that the local writer accepted the full
-frame; it does not prove that the peer executed or committed the operation.
-Once the writer is invoked, errors remain `RequestSubmissionPossible` even for
-zero-byte or partial writes. A live or concurrently dispatching request reports
-`RequestSubmissionPending`, which is also not safe to retry. Only an SDK
-classification of `RequestSubmissionNotStarted` proves that future submission
-is impossible; `RequestMayHaveBeenSubmitted` treats unclassified errors
-conservatively.
-
-`CancelRequest` sends at most one best-effort ACP `$/cancel_request` after a
-successful dispatch and retains the original response waiter. `Abandon` only
-releases local pending ownership. `DispatchOptions.Abort` is the separate
-transport-revocation hook for a write that cannot be interrupted by context
-cancellation; closing a shared connection can terminate other pending requests.
-
-Response observers run after notifications received before the response have
-completed and before typed decoding or public `Wait` completion. Notifications
-received after the response remain gated until observation and response
-completion finish. Observers must not wait for work that depends on a later
-notification from the same connection.
-
-## Generate and validate
-
-~~~bash
-make verify-schema
-make verify-upstream
-make check-generated
-make test
-make test-race
-make vet
-~~~
-
-The generator is a separate module under cmd/generate. Generated files carry
-DO NOT EDIT headers. make check-generated regenerates into a temporary
-directory and compares every generated file.
-
-Fuzz seed corpora for JSON messages, request IDs, unions, and framing replay
-during ordinary go test. Longer fuzzing can target individual fuzz functions:
-
-~~~bash
+```bash
+make check          # verify-schema + verify-upstream + check-generated + test + vet + gofmt + git diff --check
+make test-race      # race detector across root and cmd/generate
+make sync-upstream-docs  # sync marked upstream pin tables in README / docs from lock files
 go test -run=^$ -fuzz=FuzzRequestID -fuzztime=30s
-~~~
+```
 
-## Releases
+Generated files carry `DO NOT EDIT` headers; `cmd/generate` is isolated as its own module, and `make check-generated` verifies zero drift between schemas and checked-in Go code. Fuzz seed corpora for JSON messages, request IDs, unions, and framing replay automatically during `go test ./...`.
 
-Release Please maintains the version, changelog, and installation example in a
-Release PR. A maintainer approves its complete CI before merging. Publication
-verifies that the merged release contains exactly the tested Git tree before
-creating an immutable tag and GitHub Release. Ordinary PRs do not need to track
-every main update; release version bumps always require the full matrix,
-including race checks, Windows stdio, and official SDK interoperability.
+Release Please maintains release PRs, while publication verifies that the merged Git tree matches the complete CI matrix—including `-race`, native Windows `stdio`, fresh-consumer module builds, API diff checks, and official SDK interop. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml), [`RELEASING.md`](RELEASING.md), [`CHANGELOG.md`](CHANGELOG.md), and [`SECURITY.md`](SECURITY.md).
 
-See [RELEASING.md](RELEASING.md) for approval, validation, publication and recovery,
-and [v1.4.0 migration notes](docs/upgrading-to-v1.4.0.md) for the protocol upgrade.
+## Attribution and license
 
-## Attribution
+Licensed under the **Apache License 2.0** (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)).
 
-The implementation derives its generator and connection baseline from
-[coder/acp-go-sdk](https://github.com/coder/acp-go-sdk), then updates it for
-the current official schema and the stricter bounds/lifecycle contract in this
-repository. See NOTICE and LICENSE.
+The implementation derives its generator and connection baseline from [`coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk), and evolves independently to track pinned official schemas with strict bounds, lifecycle guarantees, and cross-SDK conformance gates.

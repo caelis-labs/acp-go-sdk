@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const releaseFiles = new Set(['.release-please-manifest.json', 'CHANGELOG.md']);
-const rootDocs = new Set(['README.md', 'RELEASING.md', 'SECURITY.md', 'AGENTS.md', 'upstream/README.md']);
+const rootDocs = new Set(['README.md', 'README.zh-CN.md', 'RELEASING.md', 'SECURITY.md', 'AGENTS.md', 'upstream/README.md']);
 const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const isDoc = path => rootDocs.has(path) || (path.startsWith('docs/') && path.endsWith('.md'));
 

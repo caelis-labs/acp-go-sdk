@@ -13,6 +13,10 @@ verify-schema:
 verify-upstream:
 	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/upstreamdrift
 
+.PHONY: sync-upstream-docs
+sync-upstream-docs:
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/upstreamdrift -sync-docs
+
 .PHONY: upstream-drift
 upstream-drift:
 	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go run ./cmd/upstreamdrift -remote

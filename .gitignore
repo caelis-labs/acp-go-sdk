@@ -6,3 +6,4 @@
 /interop/peers/typescript/dist/
 /interop/peers/typescript/node_modules/
 /interop/peers/rust/target/
+.DS_Store
