@@ -35,5 +35,9 @@ the provider never received the abandoned operation.
 These tests use the published SDKs' experimental entrypoints and test-owned
 routing. The unstable schemas stay outside the generated Go packages. The
 suite covers neither ordinary stdio MCP execution nor a Codex adapter.
-The [interop scope](../interop/README.md) records the Rust v1 active-parent
-session routing limitation found during verification.
+Rust SDK 5.6.0 could send an active-parent request to the v1 session update
+stream before MCP admission, as reported in
+[rust-sdk#528](https://github.com/agentclientprotocol/rust-sdk/issues/528).
+The [interop matrix](../interop/README.md) now pins 5.6.1 and checks the
+active-parent rejection in both wire profiles after
+[rust-sdk#529](https://github.com/agentclientprotocol/rust-sdk/pull/529).

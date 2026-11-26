@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -244,18 +245,36 @@ func testMCPAdmission(t *testing.T, version int, command stdio.Command) {
 	}
 	announced := false
 	for i, probe := range []struct {
-		name   string
-		fields contract.Object
-		want   contract.Object
+		name         string
+		fields       contract.Object
+		want         contract.Object
+		rejectReason string
 	}{
-		{"missing session", contract.Object{}, nil},
-		{"null session", contract.Object{"sessionId": nil}, nil},
-		{"tool alone", contract.Object{"toolCallId": "tool-1"}, nil},
-		{"unrelated session with same tool", contract.Object{"sessionId": "foreign", "toolCallId": "tool-1"}, nil},
-		{"unannounced child", contract.Object{"sessionId": "child"}, nil},
-		{"child without tool", contract.Object{"sessionId": "child"}, contract.Object{"sessionId": "child", "toolCallId": nil, "runs": float64(1)}},
-		{"child and an unreported tool", contract.Object{"sessionId": "child", "toolCallId": "tool-1"}, contract.Object{"sessionId": "child", "toolCallId": "tool-1", "runs": float64(2)}},
-		{"next call with same tool", contract.Object{"sessionId": "child", "toolCallId": "tool-1"}, contract.Object{"sessionId": "child", "toolCallId": "tool-1", "runs": float64(3)}},
+		{name: "missing session", fields: contract.Object{}},
+		{name: "null session", fields: contract.Object{"sessionId": nil}},
+		{name: "tool alone", fields: contract.Object{"toolCallId": "tool-1"}},
+		{
+			name:         "active parent with same tool",
+			fields:       contract.Object{"sessionId": "parent", "toolCallId": "tool-1"},
+			rejectReason: "outside the fixture session",
+		},
+		{name: "unrelated session with same tool", fields: contract.Object{"sessionId": "foreign", "toolCallId": "tool-1"}},
+		{name: "unannounced child", fields: contract.Object{"sessionId": "child"}},
+		{
+			name:   "child without tool",
+			fields: contract.Object{"sessionId": "child"},
+			want:   contract.Object{"sessionId": "child", "toolCallId": nil, "runs": float64(1)},
+		},
+		{
+			name:   "child and an unreported tool",
+			fields: contract.Object{"sessionId": "child", "toolCallId": "tool-1"},
+			want:   contract.Object{"sessionId": "child", "toolCallId": "tool-1", "runs": float64(2)},
+		},
+		{
+			name:   "next call with same tool",
+			fields: contract.Object{"sessionId": "child", "toolCallId": "tool-1"},
+			want:   contract.Object{"sessionId": "child", "toolCallId": "tool-1", "runs": float64(3)},
+		},
 	} {
 		if probe.want != nil && !announced {
 			err := conn.SendNotification(ctx, "session/update", contract.Object{
@@ -288,6 +307,11 @@ func testMCPAdmission(t *testing.T, version int, command stdio.Command) {
 			var remote *acp.RequestError
 			if !errors.As(err, &remote) || remote.Code != -32602 {
 				t.Fatalf("%s: expected outer Invalid params, got %v, %v\nstderr: %s", probe.name, got, err, stderr.String())
+			}
+			// The TypeScript SDK includes the fixture reason in message and Rust includes it in data.
+			detail, _ := remote.Data.(string)
+			if probe.rejectReason != "" && !strings.Contains(remote.Message, probe.rejectReason) && !strings.Contains(detail, probe.rejectReason) {
+				t.Fatalf("%s: expected admission rejection %q, got %v", probe.name, probe.rejectReason, remote)
 			}
 		} else {
 			if err != nil {

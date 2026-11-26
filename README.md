@@ -261,7 +261,8 @@ generated `State`, `Set`, `Clear`, and `Unset` methods. See the
 receiver validation, and the isolated v2 alpha.8 API changes. The
 [October 2026 alignment notes](docs/schema-sdk-alignment-2026-10.md) describe
 schema 1.26.0 / v2 alpha.9. The [latest alignment notes](docs/schema-sdk-alignment-2026-11-24.md)
-cover schema 1.35.0 / v2 beta.4, TypeScript 2.12.0 and Rust 5.6.0.
+cover schema 1.35.0 / v2 beta.4 and TypeScript 2.12.0. The
+[interop matrix](interop/README.md) now uses Rust 5.6.1.
 The [versioned interop follow-up](docs/versioned-interop-2026-11-13.md) expands
 the verification to both wire profiles and fixes invalid v2 error-envelope IDs.
 
