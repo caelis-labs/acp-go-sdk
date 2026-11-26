@@ -169,10 +169,10 @@ func TestDependencyLocks(t *testing.T) {
 	}
 	if locked.Rust.Package != "agent-client-protocol" ||
 		locked.Rust.Repository != "https://github.com/agentclientprotocol/rust-sdk" ||
-		locked.Rust.Version != "5.6.0" ||
-		locked.Rust.Tag != "v5.6.0" ||
-		locked.Rust.Commit != "81e9d7284024cca48e5756615b47f5102fe37e3d" ||
-		locked.Rust.Checksum != "0804940deae7feccabb0408bc63bd9fefb7e4d0d3bcd8e72c5764288c487cac3" ||
+		locked.Rust.Version != "5.6.1" ||
+		locked.Rust.Tag != "v5.6.1" ||
+		locked.Rust.Commit != "4656755a625c6747ecde84b3358a0a9e8af9f9b0" ||
+		locked.Rust.Checksum != "e2889673b9bc92e57857cb780f5431b684840c78a95a8edaa4afc00293d10dda" ||
 		locked.Rust.Toolchain != "1.88.0" {
 		t.Fatalf("unexpected Rust lock: %+v", locked.Rust)
 	}

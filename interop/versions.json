@@ -10,10 +10,10 @@
   "rust": {
     "package": "agent-client-protocol",
     "repository": "https://github.com/agentclientprotocol/rust-sdk",
-    "version": "5.6.0",
-    "tag": "v5.6.0",
-    "commit": "81e9d7284024cca48e5756615b47f5102fe37e3d",
-    "checksum": "0804940deae7feccabb0408bc63bd9fefb7e4d0d3bcd8e72c5764288c487cac3",
+    "version": "5.6.1",
+    "tag": "v5.6.1",
+    "commit": "4656755a625c6747ecde84b3358a0a9e8af9f9b0",
+    "checksum": "e2889673b9bc92e57857cb780f5431b684840c78a95a8edaa4afc00293d10dda",
     "toolchain": "1.88.0"
   }
 }

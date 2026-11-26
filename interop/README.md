@@ -66,7 +66,7 @@ are exercised. The extensions `_interop/inspect` and `_interop/flush` exist only
 in these test agents and never enter generated ACP objects or the stable API.
 
 TypeScript 2.12.0 uses its default v1 entrypoint and, separately,
-`@agentclientprotocol/sdk/experimental/v2`. Rust 5.6.0 explicitly uses `.v1()`
+`@agentclientprotocol/sdk/experimental/v2`. Rust 5.6.1 explicitly uses `.v1()`
 and `.v2()`, with `unstable_protocol_v2` and `unstable_mcp_over_acp` enabled in
 the peer dependency. The core tests keep their existing capabilities. SDK package
 majors do not choose the ACP wire major. Go contract peers use the bounded
@@ -84,11 +84,14 @@ lookup when the caller disconnects. A provider-side trace verifies that the
 abandoned operation is absent even after the child is announced and the lookup
 settles. A later call succeeds on the same connection.
 
-The bridge case checks parent-versus-child attribution. The SDK provider
-cases check an unrelated session with the same tool ID. In Rust SDK 5.6.0,
-the v1 session builder can deliver MCP requests attributed to its active
-parent to the general session update stream before the MCP provider sees
-them. The fixture does not assert admission of that Rust v1 path.
+The provider cases send requests with the same tool ID for both the active
+parent and an unrelated session. The active-parent request must return the
+fixture's explicit outer `-32602` admission rejection. The announced child
+then succeeds, and the service counter shows that rejected requests did not
+run the tool. Rust SDK 5.6.1 includes the fix for the v1 timeout seen in
+[rust-sdk#528](https://github.com/agentclientprotocol/rust-sdk/issues/528).
+[`mcp/message` is routed by server ID](https://github.com/agentclientprotocol/rust-sdk/pull/529),
+and the provider receives the session ID for attribution and admission.
 
 Official v2 clients pin outgoing initialize to their configured v2 profile.
 The lower-version rejection probe therefore uses raw NDJSON, rather than claim
